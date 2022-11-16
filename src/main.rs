@@ -19,7 +19,10 @@ async fn main() -> Result<()> {
     println!("Authentication Successful");
     let (tool_name, tool_id) = tool_select(&client).await?;
     let bookings = client.get_tool_bookings(&tool_id).await?;
-    let openings = bookings.inverted();
+    let mut openings = bookings.inverted();
+    openings.subtract_before_now();
+    openings.subtract_weekends();
+    openings.subract_after_hours();
     println!("Openings for `{tool_name}`");
     println!("{openings}");
     Ok(())

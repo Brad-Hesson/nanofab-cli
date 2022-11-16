@@ -1,6 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{format::ParseErrorKind, Datelike, Days, NaiveDateTime, Weekday};
-use core::time;
 use itertools::Itertools;
 use reqwest::Client;
 use scraper::Selector;
@@ -332,7 +331,6 @@ impl TimeTable {
             self.subtract_timeslot(&weekend);
             weekend.add_days(7);
         }
-
     }
     pub fn subract_after_hours(&mut self) {
         let last_time = match self.timeslots.last().unwrap().end {

@@ -2,6 +2,7 @@ mod nanofab;
 
 use crate::nanofab::NanoFab;
 use anyhow::{Ok, Result};
+use chrono::Duration;
 use itertools::Itertools;
 
 #[tokio::main]
@@ -18,11 +19,18 @@ async fn main() -> Result<()> {
         .await?;
     println!("Authentication Successful");
     let (tool_name, tool_id) = tool_select(&client).await?;
+    println!("Enter time required (hh:mm):");
+    let mut time_str = String::new();
+    std::io::stdin().read_line(&mut time_str)?;
+    let (hours, minutes) = time_str.trim().split_once(':').unwrap();
+    let duration =
+        Duration::hours(hours.parse().unwrap()) + Duration::minutes(minutes.parse().unwrap());
     let bookings = client.get_tool_bookings(&tool_id).await?;
     let mut openings = bookings.inverted();
     openings.subtract_before_now();
     openings.subtract_weekends();
-    openings.subract_after_hours();
+    openings.subtract_after_hours();
+    openings.subtract_less_duration(duration);
     println!("Openings for `{tool_name}`");
     println!("{openings}");
     Ok(())

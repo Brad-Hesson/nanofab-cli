@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
-use chrono::{format::ParseErrorKind, Datelike, Days, NaiveDateTime, Weekday};
+use chrono::{format::ParseErrorKind, Datelike, Days, Duration, NaiveDateTime, Weekday};
 use itertools::Itertools;
 use reqwest::Client;
 use scraper::Selector;
@@ -239,6 +239,12 @@ impl TimeSlot {
             .as_mut()
             .map(|dt| *dt = dt.checked_sub_days(Days::new(days)).unwrap());
     }
+    pub fn duration(&self) -> Option<Duration> {
+        match (self.start, self.end) {
+            (Some(start), Some(end)) => Some(end - start),
+            _ => None,
+        }
+    }
     pub fn compare_datetime(&self, datetime: NaiveDateTime) -> RelTime {
         use RelTime::*;
         match (self.start, self.end) {
@@ -284,6 +290,16 @@ impl TimeTable {
         Self {
             timeslots: timeslots.into_iter().collect(),
         }
+    }
+    pub fn subtract_less_duration(&mut self, duration: Duration) {
+        self.timeslots = self
+            .timeslots
+            .drain(..)
+            .filter(|ts| match ts.duration() {
+                Some(dur) => dur >= duration,
+                None => true,
+            })
+            .collect();
     }
     pub fn inverted(self) -> Self {
         match &self.timeslots[..] {
@@ -332,7 +348,7 @@ impl TimeTable {
             weekend.add_days(7);
         }
     }
-    pub fn subract_after_hours(&mut self) {
+    pub fn subtract_after_hours(&mut self) {
         let last_time = match self.timeslots.last().unwrap().end {
             Some(dt) => dt,
             None => self

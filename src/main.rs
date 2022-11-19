@@ -8,7 +8,7 @@ use chrono::Duration;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode},
-    style::{self, style, StyledContent, Stylize},
+    style::{self, style, Stylize},
     terminal, ExecutableCommand, QueueableCommand,
 };
 use itertools::Itertools;
@@ -23,14 +23,12 @@ async fn main() -> Result<()> {
         .await?;
     println!("Authentication Successful");
     let menu = terminal_menu::menu(vec![
-        terminal_menu::button("List Tools"),
         terminal_menu::button("List Tool Openings"),
         terminal_menu::back_button("Exit"),
     ]);
     loop {
         terminal_menu::run(&menu);
         match terminal_menu::mut_menu(&menu).selected_item_name() {
-            "List Tools" => list_tools(&client).await?,
             "List Tool Openings" => list_tool_openings(&client).await?,
             "Exit" => break,
             _ => unreachable!(),
@@ -50,15 +48,6 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
     openings.subtract_after_hours();
     println!("Openings for `{}`", tool.name);
     println!("{openings}");
-    std::io::stdin().read_line(&mut String::new())?;
-    Ok(())
-}
-
-async fn list_tools(client: &NanoFab) -> Result<()> {
-    let tools = client.get_tools().await?;
-    for tool in tools {
-        println!("{}", tool.name);
-    }
     std::io::stdin().read_line(&mut String::new())?;
     Ok(())
 }
@@ -103,18 +92,20 @@ async fn tool_select(client: &NanoFab) -> Result<Option<Tool>> {
         stdout().flush()?;
         Ok(())
     };
+
     // Logic start
+    let bottom_gap = 3;
+    let mut max_tools = (terminal::size()?.1 as usize).saturating_sub(bottom_gap);
+    let all_tools = client.get_tools().await?;
+    let mut search = String::new();
+    let mut selection = None;
+    let mut disp_tools = all_tools.iter().take(max_tools).collect_vec();
+
     stdout()
         .execute(crossterm::terminal::EnterAlternateScreen)?
         .execute(cursor::MoveTo(0, 0))?;
     crossterm::terminal::enable_raw_mode()?;
-    let bottom_gap = 3;
-    let mut max_tools = (terminal::size()?.1 as usize).saturating_sub(bottom_gap);
-    let all_tools = client.get_tools().await?;
 
-    let mut search = String::new();
-    let mut selection = None;
-    let mut disp_tools = all_tools.iter().take(max_tools).collect_vec();
     update_term(&search, &disp_tools, selection)?;
 
     let result = loop {
@@ -153,7 +144,7 @@ async fn tool_select(client: &NanoFab) -> Result<Option<Tool>> {
                 KeyCode::Down => {
                     if selection.is_none() {
                         selection = Some(0)
-                    } else if selection.unwrap() < disp_tools.len() - 1 {
+                    } else if selection.unwrap() < disp_tools.len().saturating_sub(1) {
                         *selection.as_mut().unwrap() += 1;
                     }
                 }

@@ -31,7 +31,7 @@ impl NanoFab {
         .context("Failed to authenticate")?;
         Ok(())
     }
-    pub async fn get_tools(&self) -> Result<BTreeMap<String, String>> {
+    pub async fn get_tools(&self) -> Result<Vec<Tool>> {
         let resp = self
             .get("https://admin.nanofab.ualberta.ca/ajax.get-tools.php?term=&hide_inactive=1")
             .await
@@ -41,24 +41,23 @@ impl NanoFab {
             .expect("Tool list should be an JSON array")
             .iter()
             .map(|value| {
-                (
-                    value
-                        .get("label")
-                        .expect("Tool list entry should contain a `label` member")
-                        .as_str()
-                        .expect("Tool label should be a string")
-                        .to_string(),
-                    value
-                        .get("id")
-                        .expect("Tool list entry should contain a `id` member")
-                        .as_str()
-                        .expect("Tool id should be a string")
-                        .to_string(),
-                )
+                let name = value
+                    .get("label")
+                    .expect("Tool list entry should contain a `label` member")
+                    .as_str()
+                    .expect("Tool label should be a string")
+                    .to_string();
+                let id = value
+                    .get("id")
+                    .expect("Tool list entry should contain a `id` member")
+                    .as_str()
+                    .expect("Tool id should be a string")
+                    .to_string();
+                Tool { name, id }
             })
             .collect())
     }
-    pub async fn get_tool_bookings(&self, tool_id: &str) -> Result<TimeTable> {
+    pub async fn get_tool_bookings(&self, tool: &Tool) -> Result<TimeTable> {
         let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
         let mut fail_count = 0;
         let json_value = loop {
@@ -67,7 +66,7 @@ impl NanoFab {
                 .post(
                     "https://admin.nanofab.ualberta.ca/ajax.get-bookings.php",
                     [
-                        ("tool_id[]", tool_id),
+                        ("tool_id[]", tool.id.as_str()),
                         ("nonce", &nonce),
                         ("nonce_key", &nonce_key),
                         ("start_date", &current_date),
@@ -495,4 +494,11 @@ impl Display for TimeTable {
         }
         Ok(())
     }
+}
+
+#[non_exhaustive]
+#[derive(Debug, Clone)]
+pub struct Tool {
+    pub name: String,
+    pub id: String,
 }

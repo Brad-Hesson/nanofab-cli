@@ -94,7 +94,7 @@ async fn tool_select(client: &NanoFab) -> Result<Option<Tool>> {
     };
 
     // Logic start
-    let bottom_gap = 3;
+    let bottom_gap = 2;
     let mut max_tools = (terminal::size()?.1 as usize).saturating_sub(bottom_gap);
     let all_tools = client.get_tools().await?;
     let mut search = String::new();

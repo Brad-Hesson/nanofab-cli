@@ -4,13 +4,13 @@ use std::io::{stdout, Write};
 
 use crate::nanofab::NanoFab;
 use anyhow::{Ok, Result};
+use chrono::Duration;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode},
-    style::{self, Stylize},
+    style::{self, style, StyledContent, Stylize},
     terminal, ExecutableCommand, QueueableCommand,
 };
-use chrono::Duration;
 use itertools::Itertools;
 use nanofab::Tool;
 
@@ -77,26 +77,23 @@ async fn tool_select(client: &NanoFab) -> Result<Option<Tool>> {
     let update_term = |search: &str, tools: &[&Tool], selection: Option<usize>| {
         stdout()
             .queue(cursor::MoveTo(0, 0))?
-            .queue(terminal::Clear(terminal::ClearType::CurrentLine))?
             .queue(style::Print("Search for tool:"))?
+            .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
             .queue(cursor::MoveDown(1))?
-            .queue(terminal::Clear(terminal::ClearType::CurrentLine))?
             .queue(cursor::MoveToColumn(0))?
             .queue(style::Print(&search))?
+            .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
             .queue(cursor::SavePosition)?;
         for (i, tool) in tools.iter().enumerate() {
+            let mut tool_name = style(&tool.name);
+            if selection == Some(i) {
+                tool_name = tool_name.negative();
+            }
             stdout()
                 .queue(cursor::MoveDown(1))?
                 .queue(cursor::MoveToColumn(0))?
-                .queue(terminal::Clear(terminal::ClearType::CurrentLine))?;
-            match selection {
-                Some(selected_index) if selected_index == i => {
-                    stdout().queue(style::PrintStyledContent(tool.name.clone().negative()))?;
-                }
-                _ => {
-                    stdout().queue(style::Print(&tool.name))?;
-                }
-            };
+                .queue(style::PrintStyledContent(tool_name))?
+                .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?;
         }
         stdout()
             .queue(cursor::MoveDown(1))?

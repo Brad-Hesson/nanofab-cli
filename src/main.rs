@@ -10,6 +10,7 @@ use crossterm::{
     style::{self, Stylize},
     terminal, ExecutableCommand, QueueableCommand,
 };
+use chrono::Duration;
 use itertools::Itertools;
 use nanofab::Tool;
 
@@ -46,7 +47,7 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
     let mut openings = bookings.inverted();
     openings.subtract_before_now();
     openings.subtract_weekends();
-    openings.subract_after_hours();
+    openings.subtract_after_hours();
     println!("Openings for `{}`", tool.name);
     println!("{openings}");
     std::io::stdin().read_line(&mut String::new())?;

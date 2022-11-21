@@ -62,7 +62,6 @@ async fn run_ui() -> Result<()> {
             .queue_ver_selector(&options, selector)?
             .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
             .flush()?;
-
         let event = event::read()?;
         if event.updown_driver(&mut selector, options.len() - 1) {
         } else if event.is_key(KeyCode::Esc) {
@@ -84,7 +83,7 @@ async fn run_ui() -> Result<()> {
 }
 
 async fn list_tool_openings(client: &NanoFab) -> Result<()> {
-    let Some(tool) = tool_select(&client).await?else{
+    let Some(tool) = user_tool_select(&client).await?else{
         return Ok(());
     };
     let bookings = client.get_tool_bookings(&tool).await?;
@@ -92,10 +91,39 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
     openings.subtract_before_now();
     openings.subtract_weekends();
     openings.subtract_after_hours();
-    terminal::disable_raw_mode()?;
-    println!("Openings for `{}`", tool.name);
-    println!("{openings}");
-    std::io::stdin().read_line(&mut String::new())?;
+
+    crossterm::terminal::enable_raw_mode()?;
+    stdout().execute(crossterm::terminal::EnterAlternateScreen)?;
+    let mut scroll = Some(0);
+    let buffer = format!("{openings}");
+    let lines = buffer.lines().collect_vec();
+    let bottom_gap = 1;
+    let mut max_lines = (terminal::size()?.1 as usize).saturating_sub(bottom_gap);
+    loop {
+        stdout()
+            .queue(cursor::Hide)?
+            .queue(cursor::MoveTo(0, 0))?
+            .queue(style::Print(format!("Openings for `{}`", tool.name)))?;
+        for line in lines.iter().skip(scroll.unwrap()).take(max_lines) {
+            stdout()
+                .queue(cursor::MoveDown(1))?
+                .queue(cursor::MoveToColumn(0))?
+                .queue(style::Print(line))?
+                .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?;
+        }
+        stdout()
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
+            .flush()?;
+        let event = event::read()?;
+        if event.updown_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
+        } else if event.is_key(KeyCode::Enter) {
+            break;
+        } else if event.is_key(KeyCode::Esc) {
+            break;
+        } else if let Some((_, rows)) = event.is_resize() {
+            max_lines = (rows as usize).saturating_sub(bottom_gap);
+        }
+    }
     Ok(())
 }
 
@@ -108,7 +136,7 @@ fn user_confirm() -> Result<bool> {
             .queue(cursor::Hide)?
             .queue(cursor::MoveTo(0, 0))?
             .queue(style::Print("Are you sure? "))?
-            .queue_hor_selector(&["Yes", "No"], selector)?
+            .queue_hor_selector(&["[Yes]", "[No]"], selector)?
             .flush()?;
         let event = event::read()?;
         if event.leftright_driver(&mut selector, 1) {
@@ -136,6 +164,7 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
     let mut username = String::new();
     loop {
         stdout()
+            .queue(cursor::Show)?
             .queue(cursor::MoveTo(0, 0))?
             .queue(style::Print("Enter username: "))?
             .queue(style::Print(&username))?
@@ -173,7 +202,7 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
             .queue(cursor::Hide)?
             .queue(cursor::MoveTo(0, 2))?
             .queue(style::Print("Save login? "))?
-            .queue_hor_selector(&["Yes", "No"], save_login)?
+            .queue_hor_selector(&["[Yes]", "[No]"], save_login)?
             .flush()?;
         let event = event::read()?;
         if event.leftright_driver(&mut save_login, 1) {
@@ -187,7 +216,7 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
     Ok(Some(login))
 }
 
-async fn tool_select(client: &NanoFab) -> Result<Option<Tool>> {
+async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
     let bottom_gap = 2;
     let mut max_tools = (terminal::size()?.1 as usize).saturating_sub(bottom_gap);
     let all_tools = client.get_tools().await?;
@@ -203,6 +232,7 @@ async fn tool_select(client: &NanoFab) -> Result<Option<Tool>> {
             .map(|tool| tool.name.as_str())
             .collect_vec();
         stdout()
+            .queue(cursor::Show)?
             .queue(cursor::MoveTo(0, 0))?
             .queue(style::Print("Search for tool:"))?
             .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
@@ -217,7 +247,6 @@ async fn tool_select(client: &NanoFab) -> Result<Option<Tool>> {
             .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
             .queue(cursor::RestorePosition)?
             .flush()?;
-
         let event = event::read()?;
         if event.string_driver(&mut search_str) {
             selection = None;

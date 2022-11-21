@@ -3,6 +3,7 @@ use chrono::{format::ParseErrorKind, Datelike, Days, Duration, NaiveDateTime, We
 use itertools::Itertools;
 use reqwest::Client;
 use scraper::Selector;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{collections::BTreeMap, fmt::Display};
 
@@ -18,12 +19,12 @@ impl NanoFab {
                 .expect("Creating the client should not fail"),
         }
     }
-    pub async fn authenticate(&self, username: &str, password: &str) -> Result<()> {
+    pub async fn authenticate(&self, login: &Login) -> Result<()> {
         self.post(
             "https://admin.nanofab.ualberta.ca/ajax.login.php",
             [
-                ("uname", username),
-                ("password", password),
+                ("uname", login.username.as_str()),
+                ("password", login.password.as_str()),
                 ("eaaa42a1464aa2b40a3ecfd68e2105d7", "1"),
             ],
         )
@@ -517,4 +518,11 @@ impl Display for TimeTable {
 pub struct Tool {
     pub name: String,
     pub id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Login {
+    pub username: String,
+    pub password: String,
 }

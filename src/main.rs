@@ -22,6 +22,10 @@ const LOGIN_FILENAME: &str = "login.ron";
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    crossterm::terminal::enable_raw_mode()?;
+    stdout()
+        .execute(crossterm::terminal::EnterAlternateScreen)?
+        .execute(event::EnableMouseCapture)?;
     let res = run_ui().await;
     crossterm::terminal::disable_raw_mode()?;
     stdout()
@@ -52,10 +56,6 @@ async fn run_ui() -> Result<()> {
     }
 
     // Main menu
-    crossterm::terminal::enable_raw_mode()?;
-    stdout()
-        .execute(crossterm::terminal::EnterAlternateScreen)?
-        .execute(event::EnableMouseCapture)?;
     let mut selector = Some(0);
     loop {
         let mut options = vec![];
@@ -104,8 +104,6 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
     openings.subtract_weekends();
     openings.subtract_after_hours();
 
-    crossterm::terminal::enable_raw_mode()?;
-    stdout().execute(crossterm::terminal::EnterAlternateScreen)?;
     let mut scroll = Some(0);
     let buffer = format!("{openings}");
     let lines = buffer.lines().collect_vec();
@@ -141,8 +139,6 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
 }
 
 fn user_confirm() -> Result<bool> {
-    crossterm::terminal::enable_raw_mode()?;
-    stdout().execute(crossterm::terminal::EnterAlternateScreen)?;
     let mut selector = Some(1);
     loop {
         stdout()
@@ -150,6 +146,7 @@ fn user_confirm() -> Result<bool> {
             .queue(cursor::MoveTo(0, 0))?
             .queue(style::Print("Are you sure? "))?
             .queue_hor_selector(&["[Yes]", "[No]"], selector)?
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
             .flush()?;
         let event = event::read()?;
         if event.leftright_driver(&mut selector, 1) {
@@ -172,8 +169,6 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
         }
         Err(_) => {}
     }
-    crossterm::terminal::enable_raw_mode()?;
-    stdout().execute(crossterm::terminal::EnterAlternateScreen)?;
     let mut username = String::new();
     loop {
         stdout()
@@ -237,8 +232,6 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
     let mut selection = None;
     let mut displayed_tools = all_tools.iter().take(max_tools).collect_vec();
 
-    stdout().execute(crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::terminal::enable_raw_mode()?;
     loop {
         let tool_names = displayed_tools
             .iter()

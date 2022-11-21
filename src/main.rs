@@ -47,7 +47,9 @@ async fn run_ui() -> Result<()> {
 
     // Main menu
     crossterm::terminal::enable_raw_mode()?;
-    stdout().execute(crossterm::terminal::EnterAlternateScreen)?;
+    stdout()
+        .execute(crossterm::terminal::EnterAlternateScreen)?
+        .execute(event::EnableMouseCapture)?;
     let mut selector = Some(0);
     loop {
         let mut options = vec![];
@@ -116,6 +118,7 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
             .flush()?;
         let event = event::read()?;
         if event.updown_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
+        } else if event.scroll_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
         } else if event.is_key(KeyCode::Enter) {
             break;
         } else if event.is_key(KeyCode::Esc) {
@@ -260,6 +263,7 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
                 .take(max_tools)
                 .collect();
         } else if event.updown_driver(&mut selection, displayed_tools.len().saturating_sub(1)) {
+        } else if event.scroll_driver(&mut selection, displayed_tools.len().saturating_sub(1)) {
         } else if event.is_key(KeyCode::Esc) {
             return Ok(None);
         } else if event.is_key(KeyCode::Enter) & selection.is_some() {

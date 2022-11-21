@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::{
     cursor,
-    event::{Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind},
     style::{self, style, Stylize},
     terminal,
 };
@@ -48,6 +48,24 @@ impl<T> QueueableCommand for T where T: crossterm::QueueableCommand {}
 
 pub trait EventObject {
     fn event(&self) -> &Event;
+    fn is_mouse_scroll_up(&self) -> bool {
+        match self.event() {
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                ..
+            }) => true,
+            _ => false,
+        }
+    }
+    fn is_mouse_scroll_down(&self) -> bool {
+        match self.event() {
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                ..
+            }) => true,
+            _ => false,
+        }
+    }
     fn is_key(&self, key_code: KeyCode) -> bool {
         match self.event() {
             Event::Key(key) if key.code == key_code => true,
@@ -103,6 +121,28 @@ pub trait EventObject {
             }
             true
         } else if self.is_key(KeyCode::Down) {
+            if selector.is_none() {
+                *selector = Some(0)
+            } else {
+                *selector = Some(selector.unwrap().saturating_add(1));
+                if selector.unwrap() > max_val {
+                    *selector = Some(max_val);
+                }
+            }
+            true
+        } else {
+            false
+        }
+    }
+    fn scroll_driver(&self, selector: &mut Option<usize>, max_val: usize) -> bool {
+        if self.is_mouse_scroll_up() {
+            if selector.is_none() {
+                *selector = Some(0)
+            } else {
+                *selector = Some(selector.unwrap().saturating_sub(1));
+            }
+            true
+        } else if self.is_mouse_scroll_down() {
             if selector.is_none() {
                 *selector = Some(0)
             } else {

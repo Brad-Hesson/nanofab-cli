@@ -1,12 +1,6 @@
 mod nanofab;
 mod term_ui;
 
-use std::{
-    io::{stdout, Write},
-    vec,
-};
-
-use crate::nanofab::{Login, NanoFab, Tool};
 use anyhow::{bail, Ok, Result};
 use crossterm::{
     cursor,
@@ -14,13 +8,28 @@ use crossterm::{
     style, terminal, ExecutableCommand, QueueableCommand,
 };
 use itertools::Itertools;
-use term_ui::{EventObject, QueueableCommand as _};
+use std::{
+    io::{stdout, Write},
+    vec,
+};
+
+use crate::nanofab::{Login, NanoFab, Tool};
+use crate::term_ui::{EventObject, QueueableCommand as _};
 
 const CONFIG_DIR: &str = ".nanofab-cli";
 const LOGIN_FILENAME: &str = "login.ron";
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let res = run_ui().await;
+    crossterm::terminal::disable_raw_mode()?;
+    stdout()
+        .execute(crossterm::terminal::LeaveAlternateScreen)?
+        .queue(cursor::Show)?;
+    res
+}
+
+async fn run_ui() -> Result<()> {
     // Create the config dir if it doesn't exist
     let mut config_dir = dirs::home_dir().unwrap();
     config_dir.push(CONFIG_DIR);
@@ -71,10 +80,6 @@ async fn main() -> Result<()> {
             }
         };
     }
-    crossterm::terminal::disable_raw_mode()?;
-    stdout()
-        .execute(crossterm::terminal::LeaveAlternateScreen)?
-        .queue(cursor::Show)?;
     Ok(())
 }
 

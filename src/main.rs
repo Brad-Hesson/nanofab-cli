@@ -176,7 +176,7 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
             .queue(cursor::MoveTo(0, 0))?
             .queue(style::Print("Enter username: "))?
             .queue(style::Print(&username))?
-            .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
             .flush()?;
         let event = event::read()?;
         if event.string_driver(&mut username) {
@@ -193,6 +193,7 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
             .queue(cursor::MoveTo(0, 1))?
             .queue(style::Print("Enter password: "))?
             .queue(style::Print(stars))?
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
             .flush()?;
         let event = event::read()?;
         if event.string_driver(&mut password) {
@@ -211,6 +212,7 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
             .queue(cursor::MoveTo(0, 2))?
             .queue(style::Print("Save login? "))?
             .queue_hor_selector(&["[Yes]", "[No]"], save_login)?
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
             .flush()?;
         let event = event::read()?;
         if event.leftright_driver(&mut save_login, 1) {

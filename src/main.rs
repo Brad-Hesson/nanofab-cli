@@ -75,18 +75,19 @@ async fn run_ui() -> Result<()> {
         } else if event.is_key(KeyCode::Esc) {
             break;
         } else if event.is_key(KeyCode::Enter) {
-            match options[selector.unwrap()] {
+            let res = match options[selector.unwrap()] {
                 "Exit" => break,
-                "List Tool Openings" => match list_tool_openings(&client).await {
-                    Ok(_) => {}
-                    Err(err) => display_error_msg(err)?,
-                },
+                "List Tool Openings" => list_tool_openings(&client).await,
                 "Delete Saved Login" => {
                     if user_confirm()? {
                         std::fs::remove_file(&login_filepath).ok();
                     }
+                    Ok(())
                 }
                 selection => bail!("`{selection}` is not implemented"),
+            };
+            if let Err(err) = res {
+                display_error_msg(err)?;
             }
         };
     }

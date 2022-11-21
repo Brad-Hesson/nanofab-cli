@@ -141,22 +141,6 @@ checksum = "5827cebf4670468b8772dd191856768aedcb1b0278a04f989f7766351917b9dc"
 
 [[package]]
 name = "crossterm"
-version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2102ea4f781910f8a5b98dd061f4c2023f479ce7bb1236330099ceb5a93cf17"
-dependencies = [
- "bitflags",
- "crossterm_winapi",
- "libc",
- "mio",
- "parking_lot",
- "signal-hook",
- "signal-hook-mio",
- "winapi",
-]
-
-[[package]]
-name = "crossterm"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e64e6c0fbe2c17357405f7c758c1ef960fce08bdfb2c03d88d2a18d7e09c4b67"
@@ -763,7 +747,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "crossterm 0.25.0",
+ "crossterm",
  "dirs",
  "itertools",
  "reqwest",
@@ -771,7 +755,6 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
- "terminal-menu",
  "tokio",
 ]
 
@@ -1528,16 +1511,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bab24d30b911b2376f3a13cc2cd443142f0c81dda04c118693e35b3835757755"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "terminal-menu"
-version = "2.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e18abfbe4149a0fa0122ff7e38945be51e26a232ca02fe76fe042c82b3e79f2"
-dependencies = [
- "crossterm 0.23.2",
- "lazy_static",
 ]
 
 [[package]]

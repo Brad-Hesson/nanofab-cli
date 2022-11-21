@@ -1,25 +1,32 @@
 mod nanofab;
+mod term_ui;
 
-use std::io::{stdout, Write};
+use std::{
+    io::{stdout, Write},
+    vec,
+};
 
 use crate::nanofab::{Login, NanoFab, Tool};
-use anyhow::{Ok, Result};
+use anyhow::{bail, Ok, Result};
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyModifiers},
-    style::{self, style, Stylize},
-    terminal, ExecutableCommand, QueueableCommand,
+    event::{self, KeyCode},
+    style, terminal, ExecutableCommand, QueueableCommand,
 };
 use itertools::Itertools;
+use term_ui::{EventObject, QueueableCommand as _};
 
 const CONFIG_DIR: &str = ".nanofab-cli";
+const LOGIN_FILENAME: &str = "login.ron";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Create the config dir of it doesn't exits
+    // Create the config dir if it doesn't exist
     let mut config_dir = dirs::home_dir().unwrap();
     config_dir.push(CONFIG_DIR);
-    std::fs::create_dir(config_dir).ok();
+    let mut login_filepath = config_dir.clone();
+    login_filepath.push(LOGIN_FILENAME);
+    std::fs::create_dir(&config_dir).ok();
 
     // Create the client struct
     let client = NanoFab::new();
@@ -30,18 +37,44 @@ async fn main() -> Result<()> {
     };
 
     // Main menu
-    let menu = terminal_menu::menu(vec![
-        terminal_menu::button("List Tool Openings"),
-        terminal_menu::back_button("Exit"),
-    ]);
+    crossterm::terminal::enable_raw_mode()?;
+    stdout().execute(crossterm::terminal::EnterAlternateScreen)?;
+    let mut selector = Some(0);
     loop {
-        terminal_menu::run(&menu);
-        match terminal_menu::mut_menu(&menu).selected_item_name() {
-            "List Tool Openings" => list_tool_openings(&client).await?,
-            "Exit" => break,
-            _ => unreachable!(),
+        let mut options = vec![];
+        options.push("List Tool Openings");
+        if login_filepath.exists() {
+            options.push("Delete Saved Login");
         }
+        options.push("Exit");
+        stdout()
+            .queue(cursor::Hide)?
+            .queue(cursor::MoveTo(0, 0))?
+            .queue_ver_selector(&options, selector)?
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
+            .flush()?;
+
+        let event = event::read()?;
+        if event.updown_driver(&mut selector, options.len() - 1) {
+        } else if event.is_key(KeyCode::Esc) {
+            break;
+        } else if event.is_key(KeyCode::Enter) {
+            match options[selector.unwrap()] {
+                "Exit" => break,
+                "List Tool Openings" => list_tool_openings(&client).await?,
+                "Delete Saved Login" => {
+                    if user_confirm()? {
+                        std::fs::remove_file(&login_filepath).ok();
+                    }
+                }
+                selection => bail!("`{selection}` is not implemented"),
+            }
+        };
     }
+    crossterm::terminal::disable_raw_mode()?;
+    stdout()
+        .execute(crossterm::terminal::LeaveAlternateScreen)?
+        .queue(cursor::Show)?;
     Ok(())
 }
 
@@ -61,10 +94,30 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
     Ok(())
 }
 
+fn user_confirm() -> Result<bool> {
+    crossterm::terminal::enable_raw_mode()?;
+    stdout().execute(crossterm::terminal::EnterAlternateScreen)?;
+    let mut selector = Some(1);
+    loop {
+        stdout()
+            .queue(cursor::Hide)?
+            .queue(cursor::MoveTo(0, 0))?
+            .queue(style::Print("Are you sure? "))?
+            .queue_hor_selector(&["Yes", "No"], selector)?
+            .flush()?;
+        let event = event::read()?;
+        if event.leftright_driver(&mut selector, 1) {
+        } else if event.is_key(KeyCode::Enter) {
+            break;
+        }
+    }
+    Ok(selector.unwrap() == 0)
+}
+
 async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
     let mut login_filepath = dirs::home_dir().unwrap();
     login_filepath.push(CONFIG_DIR);
-    login_filepath.push("login.ron");
+    login_filepath.push(LOGIN_FILENAME);
     match std::fs::read_to_string(&login_filepath) {
         std::io::Result::Ok(login_raw) => {
             let login = ron::from_str::<Login>(&login_raw)?;
@@ -83,96 +136,47 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
             .queue(style::Print(&username))?
             .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
             .flush()?;
-        let Event::Key(key) = event::read()?else{
-            continue;
-        };
-        match key.code {
-            KeyCode::Char(c) => {
-                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    username.push(c.to_ascii_uppercase());
-                } else {
-                    username.push(c);
-                }
-            }
-            KeyCode::Backspace => {
-                username.pop();
-            }
-            KeyCode::Esc => {
-                return Ok(None);
-            }
-            KeyCode::Enter => {
-                break;
-            }
-            _ => continue,
+        let event = event::read()?;
+        if event.string_driver(&mut username) {
+        } else if event.is_key(KeyCode::Esc) {
+            return Ok(None);
+        } else if event.is_key(KeyCode::Enter) {
+            break;
         }
     }
     let mut password = String::new();
     loop {
+        let stars = (0..password.len()).map(|_| '*').collect::<String>();
         stdout()
             .queue(cursor::MoveTo(0, 1))?
-            .queue(style::Print("Enter password: "))?;
-        for _ in 0..password.len() {
-            stdout().queue(style::Print('*'))?;
-        }
-        stdout().flush()?;
-        let Event::Key(key) = event::read()?else{
-            continue;
-        };
-        match key.code {
-            KeyCode::Char(c) => {
-                if key.modifiers.contains(KeyModifiers::SHIFT) {
-                    password.push(c.to_ascii_uppercase());
-                } else {
-                    password.push(c);
-                }
-            }
-            KeyCode::Backspace => {
-                password.pop();
-            }
-            KeyCode::Esc => {
-                return Ok(None);
-            }
-            KeyCode::Enter => {
-                break;
-            }
-            _ => continue,
+            .queue(style::Print("Enter password: "))?
+            .queue(style::Print(stars))?
+            .flush()?;
+        let event = event::read()?;
+        if event.string_driver(&mut password) {
+        } else if event.is_key(KeyCode::Esc) {
+            return Ok(None);
+        } else if event.is_key(KeyCode::Enter) {
+            break;
         }
     }
     let login = Login { username, password };
     client.authenticate(&login).await?;
-    let mut save_login = false;
+    let mut save_login = Some(1);
     loop {
         stdout()
             .queue(cursor::Hide)?
             .queue(cursor::MoveTo(0, 2))?
-            .queue(style::Print("Save login? "))?;
-        if save_login {
-            stdout()
-                .queue(style::PrintStyledContent("Yes".negative()))?
-                .queue(style::Print(" No"))?;
-        } else {
-            stdout()
-                .queue(style::Print("Yes "))?
-                .queue(style::PrintStyledContent("No".negative()))?;
-        }
-        stdout().flush()?;
-        let Event::Key(key) = event::read()?else{
-            continue;
-        };
-        match key.code {
-            KeyCode::Left if save_login == false => {
-                save_login = true;
-            }
-            KeyCode::Right if save_login == true => {
-                save_login = false;
-            }
-            KeyCode::Enter => {
-                break;
-            }
-            _ => continue,
+            .queue(style::Print("Save login? "))?
+            .queue_hor_selector(&["Yes", "No"], save_login)?
+            .flush()?;
+        let event = event::read()?;
+        if event.leftright_driver(&mut save_login, 1) {
+        } else if event.is_key(KeyCode::Enter) {
+            break;
         }
     }
-    if save_login {
+    if save_login == Some(0) {
         std::fs::write(login_filepath, ron::to_string(&login)?)?;
     }
     Ok(Some(login))
@@ -182,91 +186,64 @@ async fn tool_select(client: &NanoFab) -> Result<Option<Tool>> {
     let bottom_gap = 2;
     let mut max_tools = (terminal::size()?.1 as usize).saturating_sub(bottom_gap);
     let all_tools = client.get_tools().await?;
-    let mut search = String::new();
+    let mut search_str = String::new();
     let mut selection = None;
-    let mut disp_tools = all_tools.iter().take(max_tools).collect_vec();
+    let mut displayed_tools = all_tools.iter().take(max_tools).collect_vec();
 
-    stdout()
-        .execute(crossterm::terminal::EnterAlternateScreen)?
-        .execute(cursor::MoveTo(0, 0))?;
+    stdout().execute(crossterm::terminal::EnterAlternateScreen)?;
     crossterm::terminal::enable_raw_mode()?;
     loop {
+        let tool_names = displayed_tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect_vec();
         stdout()
             .queue(cursor::MoveTo(0, 0))?
             .queue(style::Print("Search for tool:"))?
             .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
             .queue(cursor::MoveDown(1))?
             .queue(cursor::MoveToColumn(0))?
-            .queue(style::Print(&search))?
+            .queue(style::Print(&search_str))?
             .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
-            .queue(cursor::SavePosition)?;
-        for (i, tool) in disp_tools.iter().enumerate() {
-            let mut tool_name = style(&tool.name);
-            if selection == Some(i) {
-                tool_name = tool_name.negative();
-            }
-            stdout()
-                .queue(cursor::MoveDown(1))?
-                .queue(cursor::MoveToColumn(0))?
-                .queue(style::PrintStyledContent(tool_name))?
-                .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?;
-        }
-        stdout()
+            .queue(cursor::SavePosition)?
             .queue(cursor::MoveDown(1))?
             .queue(cursor::MoveToColumn(0))?
+            .queue_ver_selector(&tool_names, selection)?
             .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
-            .queue(cursor::RestorePosition)?;
-        stdout().flush()?;
-        match event::read()? {
-            Event::Resize(_, rows) => {
-                max_tools = (rows as usize).saturating_sub(bottom_gap);
-                disp_tools = all_tools
-                    .iter()
-                    .filter(|tool| tool.name.to_lowercase().contains(&search.to_lowercase()))
-                    .take(max_tools)
-                    .collect();
-                selection
-                    .as_mut()
-                    .map(|s| *s = (*s).min(disp_tools.len().saturating_sub(1)));
-            }
-            Event::Key(key) => match key.code {
-                KeyCode::Esc => return Ok(None),
-                KeyCode::Char(c) => {
-                    search.push(c);
-                    selection = None;
-                    disp_tools = all_tools
-                        .iter()
-                        .filter(|tool| tool.name.to_lowercase().contains(&search.to_lowercase()))
-                        .take(max_tools)
-                        .collect();
-                }
-                KeyCode::Backspace => {
-                    search.pop();
-                    selection = None;
-                    disp_tools = all_tools
-                        .iter()
-                        .filter(|tool| tool.name.to_lowercase().contains(&search.to_lowercase()))
-                        .take(max_tools)
-                        .collect();
-                }
-                KeyCode::Down => {
-                    if selection.is_none() {
-                        selection = Some(0)
-                    } else if selection.unwrap() < disp_tools.len().saturating_sub(1) {
-                        *selection.as_mut().unwrap() += 1;
-                    }
-                }
-                KeyCode::Up => {
-                    if selection.is_some() && selection.unwrap() > 0 {
-                        *selection.as_mut().unwrap() -= 1;
-                    }
-                }
-                KeyCode::Enter if selection.is_some() => {
-                    return Ok(Some(disp_tools[selection.unwrap()].clone()));
-                }
-                _ => continue,
-            },
-            _ => continue,
+            .queue(cursor::RestorePosition)?
+            .flush()?;
+
+        let event = event::read()?;
+        if event.string_driver(&mut search_str) {
+            selection = None;
+            displayed_tools = all_tools
+                .iter()
+                .filter(|tool| {
+                    tool.name
+                        .to_lowercase()
+                        .contains(&search_str.to_lowercase())
+                })
+                .take(max_tools)
+                .collect();
+        } else if event.updown_driver(&mut selection, displayed_tools.len().saturating_sub(1)) {
+        } else if event.is_key(KeyCode::Esc) {
+            return Ok(None);
+        } else if event.is_key(KeyCode::Enter) & selection.is_some() {
+            return Ok(Some(displayed_tools[selection.unwrap()].clone()));
+        } else if let Some((_, rows)) = event.is_resize() {
+            max_tools = (rows as usize).saturating_sub(bottom_gap);
+            displayed_tools = all_tools
+                .iter()
+                .filter(|tool| {
+                    tool.name
+                        .to_lowercase()
+                        .contains(&search_str.to_lowercase())
+                })
+                .take(max_tools)
+                .collect();
+            selection
+                .as_mut()
+                .map(|s| *s = (*s).min(displayed_tools.len().saturating_sub(1)));
         }
     }
 }

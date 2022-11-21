@@ -5,7 +5,7 @@ use reqwest::Client;
 use scraper::Selector;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::BTreeMap, fmt::Display};
+use std::fmt::Display;
 
 pub struct NanoFab {
     client: Client,

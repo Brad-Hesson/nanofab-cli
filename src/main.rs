@@ -95,7 +95,7 @@ async fn run_ui() -> Result<()> {
 }
 
 async fn list_tool_openings(client: &NanoFab) -> Result<()> {
-    let Some(tool) = user_tool_select(&client).await?else{
+    let Some(tool) = user_tool_select(client).await?else{
         return Ok(());
     };
     let bookings = client.get_tool_bookings(&tool).await?;
@@ -125,6 +125,7 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
             .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
             .flush()?;
         let event = event::read()?;
+        #[allow(clippy::if_same_then_else)]
         if event.updown_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
         } else if event.scroll_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
         } else if event.is_key(KeyCode::Enter) {
@@ -161,13 +162,10 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
     let mut login_filepath = dirs::home_dir().unwrap();
     login_filepath.push(CONFIG_DIR);
     login_filepath.push(LOGIN_FILENAME);
-    match std::fs::read_to_string(&login_filepath) {
-        std::io::Result::Ok(login_raw) => {
-            let login = ron::from_str::<Login>(&login_raw)?;
-            client.authenticate(&login).await?;
-            return Ok(Some(login));
-        }
-        Err(_) => {}
+    if let Ok(login_raw) = std::fs::read_to_string(&login_filepath) {
+        let login = ron::from_str::<Login>(&login_raw)?;
+        client.authenticate(&login).await?;
+        return Ok(Some(login));
     }
     let mut username = String::new();
     loop {
@@ -256,6 +254,7 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
             .queue(cursor::RestorePosition)?
             .flush()?;
         let event = event::read()?;
+        #[allow(clippy::if_same_then_else)]
         if event.string_driver(&mut search_str) {
             selection = None;
             displayed_tools = all_tools
@@ -284,9 +283,9 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
                 })
                 .take(max_tools)
                 .collect();
-            selection
-                .as_mut()
-                .map(|s| *s = (*s).min(displayed_tools.len().saturating_sub(1)));
+            if let Some(s) = selection.as_mut() {
+                *s = (*s).min(displayed_tools.len().saturating_sub(1))
+            }
         }
     }
 }

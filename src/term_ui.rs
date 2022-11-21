@@ -52,28 +52,25 @@ impl<T> QueueableCommand for T where T: crossterm::QueueableCommand {}
 pub trait EventObject {
     fn event(&self) -> &Event;
     fn is_mouse_scroll_up(&self) -> bool {
-        match self.event() {
+        matches!(
+            self.event(),
             Event::Mouse(MouseEvent {
                 kind: MouseEventKind::ScrollUp,
                 ..
-            }) => true,
-            _ => false,
-        }
+            })
+        )
     }
     fn is_mouse_scroll_down(&self) -> bool {
-        match self.event() {
+        matches!(
+            self.event(),
             Event::Mouse(MouseEvent {
                 kind: MouseEventKind::ScrollDown,
                 ..
-            }) => true,
-            _ => false,
-        }
+            })
+        )
     }
     fn is_key(&self, key_code: KeyCode) -> bool {
-        match self.event() {
-            Event::Key(key) if key.code == key_code => true,
-            _ => false,
-        }
+        matches!(self.event(), Event::Key(key) if key.code == key_code)
     }
     fn is_resize(&self) -> Option<(usize, usize)> {
         match self.event() {

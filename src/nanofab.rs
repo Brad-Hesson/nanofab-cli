@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{format::ParseErrorKind, Datelike, Days, Duration, NaiveDateTime, Weekday};
 use itertools::Itertools;
@@ -223,20 +225,20 @@ impl TimeSlot {
         &self.end
     }
     pub fn add_days(&mut self, days: u64) {
-        self.start
-            .as_mut()
-            .map(|dt| *dt = dt.checked_add_days(Days::new(days)).unwrap());
-        self.end
-            .as_mut()
-            .map(|dt| *dt = dt.checked_add_days(Days::new(days)).unwrap());
+        if let Some(dt) = self.start.as_mut() {
+            *dt = dt.checked_add_days(Days::new(days)).unwrap()
+        }
+        if let Some(dt) = self.end.as_mut() {
+            *dt = dt.checked_add_days(Days::new(days)).unwrap()
+        }
     }
     pub fn sub_days(&mut self, days: u64) {
-        self.start
-            .as_mut()
-            .map(|dt| *dt = dt.checked_sub_days(Days::new(days)).unwrap());
-        self.end
-            .as_mut()
-            .map(|dt| *dt = dt.checked_sub_days(Days::new(days)).unwrap());
+        if let Some(dt) = self.start.as_mut() {
+            *dt = dt.checked_sub_days(Days::new(days)).unwrap()
+        }
+        if let Some(dt) = self.end.as_mut() {
+            *dt = dt.checked_sub_days(Days::new(days)).unwrap()
+        }
     }
     pub fn duration(&self) -> Option<Duration> {
         match (self.start, self.end) {
@@ -308,15 +310,15 @@ impl TimeTable {
         }
         let mut new_timeslots = vec![];
         if let Some(dt) = self.timeslots.first().unwrap().start() {
-            new_timeslots.push(TimeSlot::new(None, Some(dt.clone())))
+            new_timeslots.push(TimeSlot::new(None, Some(*dt)))
         }
         for (a, b) in self.timeslots.iter().tuple_windows() {
             if a.end() != b.start() {
-                new_timeslots.push(TimeSlot::new(a.end().clone(), b.start().clone()))
+                new_timeslots.push(TimeSlot::new(*a.end(), *b.start()))
             }
         }
         if let Some(dt) = self.timeslots.last().unwrap().end() {
-            new_timeslots.push(TimeSlot::new(Some(dt.clone()), None))
+            new_timeslots.push(TimeSlot::new(Some(*dt), None))
         }
         Self::new(new_timeslots)
     }

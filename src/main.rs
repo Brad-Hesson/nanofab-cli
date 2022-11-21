@@ -1,7 +1,7 @@
 mod nanofab;
 mod term_ui;
 
-use anyhow::{bail, Ok, Result};
+use anyhow::{bail, Result};
 use crossterm::{
     cursor,
     event::{self, KeyCode},
@@ -12,6 +12,7 @@ use std::{
     io::{stdout, Write},
     vec,
 };
+use term_ui::display_error_msg;
 
 use crate::nanofab::{Login, NanoFab, Tool};
 use crate::term_ui::{EventObject, QueueableCommand as _};
@@ -41,9 +42,14 @@ async fn run_ui() -> Result<()> {
     let client = NanoFab::new();
 
     // Login the user
-    if user_login(&client).await?.is_none() {
-        return Ok(());
-    };
+    loop {
+        let err = match user_login(&client).await {
+            Ok(Some(_)) => break,
+            Ok(None) => return Ok(()),
+            Err(e) => e,
+        };
+        display_error_msg(err)?;
+    }
 
     // Main menu
     crossterm::terminal::enable_raw_mode()?;
@@ -71,7 +77,10 @@ async fn run_ui() -> Result<()> {
         } else if event.is_key(KeyCode::Enter) {
             match options[selector.unwrap()] {
                 "Exit" => break,
-                "List Tool Openings" => list_tool_openings(&client).await?,
+                "List Tool Openings" => match list_tool_openings(&client).await {
+                    Ok(_) => {}
+                    Err(err) => display_error_msg(err)?,
+                },
                 "Delete Saved Login" => {
                     if user_confirm()? {
                         std::fs::remove_file(&login_filepath).ok();

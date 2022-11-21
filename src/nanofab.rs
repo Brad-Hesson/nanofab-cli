@@ -74,12 +74,11 @@ impl NanoFab {
                     ],
                 )
                 .await;
-            match maybe_value {
+            match maybe_value.context("Failed too many times") {
                 Ok(value) => break value,
                 Err(e) => {
                     fail_count += 1;
                     if fail_count >= 10 {
-                        println!("Failed too many times");
                         bail!(e)
                     }
                 }

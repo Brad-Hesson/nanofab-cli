@@ -1,10 +1,13 @@
+use std::io::{stdout, Write};
+
 use anyhow::Result;
 use crossterm::{
     cursor,
-    event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind},
     style::{self, style, Stylize},
-    terminal,
+    terminal, QueueableCommand as _,
 };
+use itertools::Itertools;
 
 pub trait QueueableCommand: crossterm::QueueableCommand {
     fn queue_maybe_highlighted(&mut self, text: &str, highlight: bool) -> Result<&mut Self> {
@@ -172,4 +175,31 @@ impl EventObject for Event {
     fn event(&self) -> &Event {
         self
     }
+}
+
+pub fn display_error_msg(error: anyhow::Error) -> Result<()> {
+    let buffer = format!("{error:?}");
+    let mut lines = buffer.lines().collect_vec();
+    lines.push("");
+    lines.push("Press [Enter] to retry");
+    let start_row = terminal::size()?.1 / 2 - lines.len() as u16 / 2;
+    stdout()
+        .queue(cursor::Hide)?
+        .queue(cursor::MoveTo(0, start_row))?
+        .queue(style::SetBackgroundColor(style::Color::Red))?;
+    for line in &lines {
+        stdout()
+            .queue(style::Print(line))?
+            .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
+            .queue(cursor::MoveDown(1))?
+            .queue(cursor::MoveToColumn(0))?;
+    }
+    stdout().queue(style::ResetColor)?.flush()?;
+    'event_loop: loop {
+        let event = event::read()?;
+        if event.is_key(KeyCode::Enter) | event.is_key(KeyCode::Esc) {
+            break 'event_loop;
+        }
+    }
+    Ok(())
 }

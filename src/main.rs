@@ -60,6 +60,7 @@ async fn run_ui() -> Result<()> {
     loop {
         let mut options = vec![];
         options.push("List Tool Openings");
+        options.push("List User Bookings");
         if login_filepath.exists() {
             options.push("Delete Saved Login");
         }
@@ -81,6 +82,43 @@ async fn run_ui() -> Result<()> {
                 "Delete Saved Login" => {
                     if user_confirm()? {
                         std::fs::remove_file(&login_filepath).ok();
+                    }
+                    Ok(())
+                }
+                "List User Bookings" => {
+                    let bookings = client.get_user_bookings().await?;
+                    let mut scroll = Some(0);
+                    let bottom_gap = 0;
+                    let mut max_lines = (terminal::size()?.1 as usize).saturating_sub(bottom_gap);
+                    loop {
+                        stdout().queue(cursor::Hide)?.queue(cursor::MoveTo(0, 0))?;
+                        for (name, time) in bookings.iter().skip(scroll.unwrap()).take(max_lines) {
+                            stdout()
+                                .queue(style::Print(name.trim()))?
+                                .queue(style::Print(" : "))?
+                                .queue(style::Print(time.trim()))?
+                                .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
+                                .queue(cursor::MoveDown(1))?
+                                .queue(cursor::MoveToColumn(0))?;
+                        }
+                        stdout()
+                            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
+                            .flush()?;
+                        let event = event::read()?;
+                        #[allow(clippy::if_same_then_else)]
+                        if event
+                            .updown_driver(&mut scroll, bookings.len().saturating_sub(max_lines))
+                        {
+                        } else if event
+                            .scroll_driver(&mut scroll, bookings.len().saturating_sub(max_lines))
+                        {
+                        } else if event.is_key(KeyCode::Enter) {
+                            break;
+                        } else if event.is_key(KeyCode::Esc) {
+                            break;
+                        } else if let Some((_, rows)) = event.is_resize() {
+                            max_lines = (rows as usize).saturating_sub(bottom_gap);
+                        }
                     }
                     Ok(())
                 }

@@ -60,6 +60,49 @@ impl NanoFab {
             })
             .collect())
     }
+    // pub async fn get_tool_from_label(&self, label: String) -> Result<Tool> {
+    //     let resp = self
+    //         .get(format!("https://admin.nanofab.ualberta.ca/ajax.get-tools.php?term={label}&hide_inactive=1").as_str())
+    //         .await
+    //         .context("Failed to get tool from server")?;
+    //     let value = resp
+    //         .as_array()
+    //         .expect("Tool list should be an JSON array")
+    //         .iter()
+    //         .exactly_one()
+    //         .context("More than one tool matching label")?;
+    //     let name = value
+    //         .get("label")
+    //         .expect("Tool list entry should contain a `label` member")
+    //         .as_str()
+    //         .expect("Tool label should be a string")
+    //         .to_string();
+    //     let id = value
+    //         .get("id")
+    //         .expect("Tool list entry should contain a `id` member")
+    //         .as_str()
+    //         .expect("Tool id should be a string")
+    //         .to_string();
+    //     Ok(Tool { name, id })
+    // }
+    pub async fn get_user_bookings(&self) -> Result<Vec<(String, String)>> {
+        let json_value = self
+            .post(
+                "https://admin.nanofab.ualberta.ca/ajax.load-modal.php",
+                [("noclass", "1"), ("load", "modal.user.bookings.php")],
+            )
+            .await?;
+        let html = scraper::Html::parse_fragment(json_value.get("msg").unwrap().as_str().unwrap());
+        let mut bookings = vec![];
+        for booking in html.select(&Selector::parse("[id^=booking-]").unwrap()) {
+            let selector = Selector::parse("[class^=columns]").unwrap();
+            let mut values = booking.select(&selector);
+            let name = values.next().unwrap().text().collect::<String>();
+            let time = values.next().unwrap().text().collect::<String>();
+            bookings.push((name, time));
+        }
+        Ok(bookings)
+    }
     pub async fn get_tool_bookings(&self, tool: &Tool) -> Result<TimeTable> {
         let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
         let mut fail_count = 0;
@@ -181,6 +224,9 @@ impl NanoFab {
         }
     }
 }
+
+#[derive(Debug, Deserialize)]
+struct ToolList(Vec<Tool>);
 
 fn parse_datetime(datetime_string: &str) -> Result<NaiveDateTime> {
     let mut fixed_str = datetime_string
@@ -515,7 +561,7 @@ impl Display for TimeTable {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Tool {
     pub name: String,
     pub id: String,

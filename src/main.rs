@@ -1,4 +1,5 @@
 mod nanofab;
+mod schedule;
 mod term_ui;
 
 use anyhow::{bail, Result};
@@ -10,6 +11,7 @@ use crossterm::{
 use itertools::Itertools;
 use std::{
     io::{stdout, Write},
+    path::Path,
     vec,
 };
 use term_ui::display_error_msg;
@@ -79,49 +81,8 @@ async fn run_ui() -> Result<()> {
             let res = match options[selector.unwrap()] {
                 "Exit" => break,
                 "List Tool Openings" => list_tool_openings(&client).await,
-                "Delete Saved Login" => {
-                    if user_confirm()? {
-                        std::fs::remove_file(&login_filepath).ok();
-                    }
-                    Ok(())
-                }
-                "List User Bookings" => {
-                    let bookings = client.get_user_bookings().await?;
-                    let mut scroll = Some(0);
-                    let bottom_gap = 0;
-                    let mut max_lines = (terminal::size()?.1 as usize).saturating_sub(bottom_gap);
-                    loop {
-                        stdout().queue(cursor::Hide)?.queue(cursor::MoveTo(0, 0))?;
-                        for (name, time) in bookings.iter().skip(scroll.unwrap()).take(max_lines) {
-                            stdout()
-                                .queue(style::Print(name.trim()))?
-                                .queue(style::Print(" : "))?
-                                .queue(style::Print(time.trim()))?
-                                .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
-                                .queue(cursor::MoveDown(1))?
-                                .queue(cursor::MoveToColumn(0))?;
-                        }
-                        stdout()
-                            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
-                            .flush()?;
-                        let event = event::read()?;
-                        #[allow(clippy::if_same_then_else)]
-                        if event
-                            .updown_driver(&mut scroll, bookings.len().saturating_sub(max_lines))
-                        {
-                        } else if event
-                            .scroll_driver(&mut scroll, bookings.len().saturating_sub(max_lines))
-                        {
-                        } else if event.is_key(KeyCode::Enter) {
-                            break;
-                        } else if event.is_key(KeyCode::Esc) {
-                            break;
-                        } else if let Some((_, rows)) = event.is_resize() {
-                            max_lines = (rows as usize).saturating_sub(bottom_gap);
-                        }
-                    }
-                    Ok(())
-                }
+                "List User Bookings" => list_user_bookings(&client).await,
+                "Delete Saved Login" => delete_saved_login(&login_filepath),
                 selection => bail!("`{selection}` is not implemented"),
             };
             if let Err(err) = res {
@@ -132,11 +93,54 @@ async fn run_ui() -> Result<()> {
     Ok(())
 }
 
+fn delete_saved_login(path: impl AsRef<Path>) -> Result<()> {
+    if user_confirm()? {
+        std::fs::remove_file(path).ok();
+    }
+    Ok(())
+}
+
+async fn list_user_bookings(client: &NanoFab) -> Result<()> {
+    let bookings = client.get_user_bookings().await?;
+    let mut scroll = Some(0);
+    let buffer = format!("{bookings}");
+    let lines = buffer.lines().collect_vec();
+    let bottom_gap = 0;
+    let mut max_lines = (terminal::size()?.1 as usize).saturating_sub(bottom_gap);
+    loop {
+        stdout().queue(cursor::Hide)?.queue(cursor::MoveTo(0, 0))?;
+        for line in lines.iter().skip(scroll.unwrap()).take(max_lines) {
+            stdout()
+                .queue(style::Print(line))?
+                .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
+                .queue(cursor::MoveDown(1))?
+                .queue(cursor::MoveToColumn(0))?;
+        }
+        stdout()
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
+            .flush()?;
+        let event = event::read()?;
+        #[allow(clippy::if_same_then_else)]
+        if event.updown_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
+        } else if event.scroll_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
+        } else if event.is_key(KeyCode::Enter) {
+            break;
+        } else if event.is_key(KeyCode::Esc) {
+            break;
+        } else if let Some((_, rows)) = event.is_resize() {
+            max_lines = (rows as usize).saturating_sub(bottom_gap);
+        }
+    }
+    Ok(())
+}
+
 async fn list_tool_openings(client: &NanoFab) -> Result<()> {
     let Some(tool) = user_tool_select(client).await?else{
         return Ok(());
     };
-    let bookings = client.get_tool_bookings(&tool).await?;
+    let bookings = client
+        .get_tool_bookings(&tool, Some(chrono::Local::now().date_naive()), None)
+        .await?;
     let mut openings = bookings.inverted();
     openings.subtract_before_now();
     openings.subtract_weekends();
@@ -151,7 +155,7 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
         stdout()
             .queue(cursor::Hide)?
             .queue(cursor::MoveTo(0, 0))?
-            .queue(style::Print(format!("Openings for `{}`", tool.name)))?;
+            .queue(style::Print(format!("Openings for `{}`", tool.label)))?;
         for line in lines.iter().skip(scroll.unwrap()).take(max_lines) {
             stdout()
                 .queue(cursor::MoveDown(1))?
@@ -273,7 +277,7 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
     loop {
         let tool_names = displayed_tools
             .iter()
-            .map(|tool| tool.name.as_str())
+            .map(|tool| tool.label.as_str())
             .collect_vec();
         stdout()
             .queue(cursor::Show)?
@@ -298,7 +302,7 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
             displayed_tools = all_tools
                 .iter()
                 .filter(|tool| {
-                    tool.name
+                    tool.label
                         .to_lowercase()
                         .contains(&search_str.to_lowercase())
                 })
@@ -315,7 +319,7 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
             displayed_tools = all_tools
                 .iter()
                 .filter(|tool| {
-                    tool.name
+                    tool.label
                         .to_lowercase()
                         .contains(&search_str.to_lowercase())
                 })

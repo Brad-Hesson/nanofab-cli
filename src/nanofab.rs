@@ -5,8 +5,7 @@ use itertools::Itertools;
 use reqwest::Client;
 use scraper::Selector;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::{future::Future, time::Duration};
-use tokio::time::sleep;
+use std::future::Future;
 
 use crate::schedule::{TimeSlot, TimeTable};
 

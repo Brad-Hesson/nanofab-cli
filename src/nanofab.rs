@@ -1,5 +1,5 @@
 use crate::{
-    html::xml_element,
+    html::Element,
     schedule::{TimeSlot, TimeTable},
 };
 
@@ -44,8 +44,10 @@ impl NanoFab {
     }
     pub async fn get_user_projects(&self) -> Result<Vec<Project>> {
         let body = [("load", "modal.tool-booking.php")];
-        let msg = self.post("https://admin.nanofab.ualberta.ca/ajax.load-modal.php", body).await?;
-        let (_, root) = xml_element::<()>(&msg)?;
+        let root = self
+            .post("https://admin.nanofab.ualberta.ca/ajax.load-modal.php", body)
+            .await?
+            .parse::<Element>()?;
         let projects = root
             .iter_decendents()
             .find(|elem| elem.has_attr("id", Some("sel_project_id")))
@@ -75,13 +77,13 @@ impl NanoFab {
         .context("No tools match label")
     }
     pub async fn get_user_bookings(&self) -> Result<TimeTable<(String, String)>> {
-        let msg = self
+        let root = self
             .post(
                 "https://admin.nanofab.ualberta.ca/ajax.load-modal.php",
                 [("load", "modal.user.bookings.php")],
             )
-            .await?;
-        let (_, root) = xml_element::<()>(&msg)?;
+            .await?
+            .parse::<Element>()?;
         let mut bookings = vec![];
         for booking_elem in
             root.iter_decendents().filter(|elem| elem.has_attr("id", Some("booking-")))
@@ -130,9 +132,10 @@ impl NanoFab {
         let (nonce, nonce_key) = self.get_nonce("modal.search-tool-bookings.php").await?;
         body.push(("nonce", nonce));
         body.push(("nonce_key", nonce_key));
-        let msg =
-            self.post("https://admin.nanofab.ualberta.ca/ajax.get-bookings.php", body).await?;
-        let (_, root) = xml_element::<()>(&msg)?;
+        let root = self
+            .post("https://admin.nanofab.ualberta.ca/ajax.get-bookings.php", body)
+            .await?
+            .parse::<Element>()?;
         let mut bookings = vec![];
         for booking_elem in
             root.iter_decendents().filter(|elem| elem.has_attr("id", Some("booking-")))
@@ -157,8 +160,7 @@ impl NanoFab {
     }
     pub async fn get_nonce(&self, modal: &str) -> Result<(String, String)> {
         let url = "https://admin.nanofab.ualberta.ca/ajax.load-modal.php";
-        let msg = self.post(url, [("load", modal)]).await?;
-        let (_, root) = xml_element::<()>(&msg)?;
+        let root = self.post(url, [("load", modal)]).await?.parse::<Element>()?;
         let nonce = root
             .iter_decendents()
             .find(|elem| elem.has_attr("name", Some("nonce")))

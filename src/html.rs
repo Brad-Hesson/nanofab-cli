@@ -1,11 +1,17 @@
-use std::{collections::BTreeMap, fmt::Display, option::Option, str::pattern::Pattern};
+use std::{
+    collections::BTreeMap,
+    fmt::Display,
+    option::Option,
+    str::{pattern::Pattern, FromStr},
+};
 
+use anyhow::anyhow;
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_until},
     character::complete::{alpha1, alphanumeric1, char, multispace0, multispace1},
     combinator::{map, opt, recognize, verify},
-    error::{context, ContextError, ParseError},
+    error::{context, ContextError, ParseError, VerboseError},
     multi::{many0, separated_list0},
     sequence::{delimited, pair, preceded, terminated},
     IResult,
@@ -60,6 +66,17 @@ impl Display for Element {
         Ok(())
     }
 }
+impl FromStr for Element {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match xml_element::<VerboseError<&str>>(s.trim()) {
+            Ok((_, elem)) => Ok(elem),
+            Err(nom::Err::Error(e) | nom::Err::Failure(e)) => Err(anyhow!(e.to_string())),
+            _ => unimplemented!(),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Content {
@@ -90,40 +107,22 @@ impl Display for Content {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum Tag {
-    Open { name: String, attrs: BTreeMap<String, String> },
-    Close { name: String },
-    Single { name: String, attrs: BTreeMap<String, String> },
-}
-impl Tag {
-    fn name(&self) -> &str {
-        match self {
-            Tag::Open { name, .. } => name,
-            Tag::Close { name } => name,
-            Tag::Single { name, .. } => name,
-        }
-    }
-    fn attrs(self) -> BTreeMap<String, String> {
-        match self {
-            Tag::Open { attrs, .. } => attrs,
-            Tag::Close { .. } => BTreeMap::new(),
-            Tag::Single { attrs, .. } => attrs,
-        }
-    }
+struct Tag {
+    name: String,
+    attrs: BTreeMap<String, String>,
+    is_close: bool,
 }
 
-pub fn xml_element<'i, E>(i: &'i str) -> IResult<&str, Element, E>
+fn xml_element<'i, E>(i: &'i str) -> IResult<&str, Element, E>
 where
     E: ContextError<&'i str> + ParseError<&'i str>,
 {
-    let first_pred = |tag: &Tag| matches!(tag, Tag::Open { .. } | Tag::Single { .. });
-    let (i, first_tag) = verify(xml_tag, first_pred)(i)?;
-    let name = first_tag.name().to_string();
-    let attrs = first_tag.attrs();
-    let close_pred = |close: &Tag| matches!(close, Tag::Close { name: n } if n == &name);
+    let (i, first_tag) = verify(xml_tag, |tag| !tag.is_close)(i)?;
+    let name = first_tag.name;
+    let attrs = first_tag.attrs;
     let i_before = i;
-    let (i_after, maybe_contents) =
-        opt(terminated(many0(xml_content), verify(preceded(multispace0, xml_tag), close_pred)))(i)?;
+    let close_p = verify(preceded(multispace0, xml_tag), |tag| tag.is_close && tag.name == name);
+    let (i_after, maybe_contents) = opt(terminated(many0(xml_content), close_p))(i)?;
     let (i, contents) = match maybe_contents {
         Some(contents) => (i_after, contents),
         None => (i_before, vec![]),
@@ -145,29 +144,15 @@ where
 
 fn xml_tag<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, Tag, E> {
     let (i, _) = char('<')(i)?;
-    let (i, start_slash) = map(opt(char('/')), |c| c.is_some())(i)?;
-    let (i, typ) = map(xml_name, |s| s.to_string())(i)?;
-    let (i, attrs) = many0_xml_attr(i)?;
-    let (i, end_slash) = map(opt(char('/')), |c| c.is_some())(i)?;
-    let (i, _) = char('>')(i)?;
-    Ok((
-        i,
-        match (start_slash, end_slash) {
-            (false, false) => Tag::Open { name: typ, attrs },
-            (false, true) => Tag::Single { name: typ, attrs },
-            (true, false) => Tag::Close { name: typ },
-            (true, true) => unimplemented!(),
-        },
-    ))
-}
-
-fn many0_xml_attr<'i, E: ParseError<&'i str>>(
-    i: &'i str,
-) -> IResult<&str, BTreeMap<String, String>, E> {
+    let (i, start_slash) = opt(char('/'))(i)?;
+    let (i, name) = map(xml_name, |s| s.to_string())(i)?;
     let attrs_p = preceded(multispace1, separated_list0(multispace1, xml_attr));
-    let (i, attrs) = map(opt(attrs_p), Option::unwrap_or_default)(i)?;
+    let (i, attrs_vec) = map(opt(attrs_p), Option::unwrap_or_default)(i)?;
     let (i, _) = multispace0(i)?;
-    Ok((i, attrs.into_iter().collect()))
+    let attrs = attrs_vec.into_iter().collect();
+    let (i, _) = opt(char('/'))(i)?;
+    let (i, _) = char('>')(i)?;
+    Ok((i, Tag { name, attrs, is_close: start_slash.is_some() }))
 }
 
 fn xml_attr<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, (String, String), E> {

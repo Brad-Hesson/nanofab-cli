@@ -1,13 +1,14 @@
+use crate::{
+    html::xml_element,
+    schedule::{TimeSlot, TimeTable},
+};
+
 use anyhow::{anyhow, Context, Result};
 use chrono::{format::ParseErrorKind, NaiveDate, NaiveDateTime};
-use futures_util::TryFutureExt;
 use itertools::Itertools;
 use reqwest::Client;
-use scraper::Selector;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::future::Future;
-
-use crate::schedule::{TimeSlot, TimeTable};
+use urlencoding::encode;
 
 pub struct NanoFab {
     client: Client,
@@ -41,6 +42,25 @@ impl NanoFab {
         .await
         .context("Failed to get tool list from server")
     }
+    pub async fn get_user_projects(&self) -> Result<Vec<Project>> {
+        let body = [("load", "modal.tool-booking.php")];
+        let msg = self.post("https://admin.nanofab.ualberta.ca/ajax.load-modal.php", body).await?;
+        let (_, root) = xml_element::<()>(&msg)?;
+        let projects = root
+            .iter_decendents()
+            .find(|elem| elem.has_attr("id", Some("sel_project_id")))
+            .unwrap()
+            .iter_children()
+            .filter(|elem| elem.has_attr("class", None))
+            .map(|elem| {
+                let name =
+                    elem.iter_contents().cloned().exactly_one().ok().unwrap().as_text().unwrap();
+                let id = elem.get_attr("value").unwrap().to_string();
+                Project { name, id }
+            })
+            .collect_vec();
+        Ok(projects)
+    }
     pub async fn get_tool_from_label(&self, label: &str) -> Result<Tool> {
         self.get::<Vec<Tool>>(
             format!(
@@ -54,30 +74,27 @@ impl NanoFab {
         .find(|tool| &tool.label == label)
         .context("No tools match label")
     }
-    pub async fn get_user_bookings(&self) -> Result<TimeTable<String>> {
+    pub async fn get_user_bookings(&self) -> Result<TimeTable<(String, String)>> {
         let msg = self
             .post(
                 "https://admin.nanofab.ualberta.ca/ajax.load-modal.php",
-                [("noclass", "1"), ("load", "modal.user.bookings.php")],
+                [("load", "modal.user.bookings.php")],
             )
             .await?;
-        let html = scraper::Html::parse_fragment(&msg);
+        let (_, root) = xml_element::<()>(&msg)?;
         let mut bookings = vec![];
-        for booking in html.select(&Selector::parse("[id^=booking-]").unwrap()) {
-            let selector = Selector::parse("[class^=columns]").unwrap();
-            let mut values = booking.select(&selector);
-            let name = values
-                .next()
-                .unwrap()
-                .text()
-                .collect::<String>()
-                .trim()
-                .to_string();
-            let time = parse_inject_year(
-                &values.next().unwrap().text().collect::<String>().trim(),
-                "%b %-d @ %-I:%M %P",
-            )
-            .expect("Time did not parse");
+        for booking_elem in
+            root.iter_decendents().filter(|elem| elem.has_attr("id", Some("booking-")))
+        {
+            let (name_str, time_str) = booking_elem
+                .iter_decendents()
+                .filter(|elem| elem.has_attr("class", Some("columns")))
+                .map(|elem| elem.iter_contents().cloned().find_map(|c| c.as_text()).unwrap())
+                .collect_tuple()
+                .unwrap();
+            let name = name_str.trim().to_string();
+            let time =
+                parse_yearless(time_str.trim(), "%b %-d @ %-I:%M %P").expect("Time did not parse");
             let tool = self.get_tool_from_label(&name).await?;
             let timeslot = self.get_tool_booking_at_time(&tool, time).await?;
             bookings.push(timeslot);
@@ -88,7 +105,7 @@ impl NanoFab {
         &self,
         tool: &Tool,
         time: NaiveDateTime,
-    ) -> Result<TimeSlot<String>> {
+    ) -> Result<TimeSlot<(String, String)>> {
         self.get_tool_bookings(tool, Some(time.date()), Some(time.date()))
             .await?
             .timeslots()
@@ -100,84 +117,61 @@ impl NanoFab {
     pub async fn get_tool_bookings(
         &self,
         tool: &Tool,
-        start: Option<NaiveDate>,
-        end: Option<NaiveDate>,
-    ) -> Result<TimeTable<String>> {
+        start_date: Option<NaiveDate>,
+        end_date: Option<NaiveDate>,
+    ) -> Result<TimeTable<(String, String)>> {
         let mut body = vec![("tool_id[]", tool.id.clone())];
-        if let Some(start) = start {
+        if let Some(start) = start_date {
             body.push(("start_date", start.format("%Y-%m-%d").to_string()));
         }
-        if let Some(end) = end {
+        if let Some(end) = end_date {
             body.push(("end_date", end.format("%Y-%m-%d").to_string()));
         }
-        let msg = retry(
-            || {
-                self.get_nonce("modal.search-tool-bookings.php")
-                    .and_then(|(nonce, nonce_key)| {
-                        self.post(
-                            "https://admin.nanofab.ualberta.ca/ajax.get-bookings.php",
-                            body.iter()
-                                .cloned()
-                                .chain([("nonce", nonce), ("nonce_key", nonce_key)].into_iter())
-                                .collect_vec(),
-                        )
-                    })
-            },
-            10,
-        )
-        .await
-        .context("Failed to get bookings from server")?;
-        let html = scraper::Html::parse_fragment(&msg);
+        let (nonce, nonce_key) = self.get_nonce("modal.search-tool-bookings.php").await?;
+        body.push(("nonce", nonce));
+        body.push(("nonce_key", nonce_key));
+        let msg =
+            self.post("https://admin.nanofab.ualberta.ca/ajax.get-bookings.php", body).await?;
+        let (_, root) = xml_element::<()>(&msg)?;
         let mut bookings = vec![];
-        for booking in html.select(&Selector::parse("[id^=booking-]").unwrap()) {
-            let selector = Selector::parse("[title]").unwrap();
-            let mut values = booking
-                .select(&selector)
-                .map(|v| v.value().attr("title").unwrap());
+        for booking_elem in
+            root.iter_decendents().filter(|elem| elem.has_attr("id", Some("booking-")))
+        {
+            let (start_str, end_str, name_str) = booking_elem
+                .iter_decendents()
+                .filter_map(|elem| elem.get_attr("title"))
+                .collect_tuple()
+                .unwrap();
             let time_fmt = "%-I:%M%P %a %b %-d";
-            let trim_ordinals = |c: char| "stndrdth".contains(c);
-            let start = parse_inject_year(
-                values.next().unwrap().trim_end_matches(trim_ordinals),
-                time_fmt,
-            )?;
-            let end = parse_inject_year(
-                values.next().unwrap().trim_end_matches(trim_ordinals),
-                time_fmt,
-            )?;
-            let name = values.next().unwrap().to_string();
-            bookings.push(TimeSlot::new(Some(start), Some(end), name));
+            let trim_ordinals = |c: char| "stndrh".contains(c);
+            let start = parse_yearless(start_str.trim_end_matches(trim_ordinals), time_fmt)?;
+            let end = parse_yearless(end_str.trim_end_matches(trim_ordinals), time_fmt)?;
+            let (name, email) = name_str.split_once(" <br/> ").unwrap();
+            bookings.push(TimeSlot::new(
+                Some(start),
+                Some(end),
+                (name.to_string(), email.to_string()),
+            ));
         }
         Ok(TimeTable::new(bookings))
     }
     pub async fn get_nonce(&self, modal: &str) -> Result<(String, String)> {
-        let msg = self
-            .post(
-                "https://admin.nanofab.ualberta.ca/ajax.load-modal.php",
-                [
-                    ("class", "ajax-panel"),
-                    ("source", "ajax.load-modal.php"),
-                    ("load", modal),
-                ],
-            )
-            .await?;
-        let html = scraper::Html::parse_fragment(&msg);
-        let nonce = html
-            .select(&Selector::parse("[name=nonce]").unwrap())
-            .exactly_one()
+        let url = "https://admin.nanofab.ualberta.ca/ajax.load-modal.php";
+        let msg = self.post(url, [("load", modal)]).await?;
+        let (_, root) = xml_element::<()>(&msg)?;
+        let nonce = root
+            .iter_decendents()
+            .find(|elem| elem.has_attr("name", Some("nonce")))
             .unwrap()
-            .value()
-            .attr("value")
+            .get_attr("value")
+            .unwrap();
+        let nonce_key = root
+            .iter_decendents()
+            .find(|elem| elem.has_attr("name", Some("nonce_key")))
             .unwrap()
-            .to_string();
-        let nonce_key = html
-            .select(&Selector::parse("[name=nonce_key]").unwrap())
-            .exactly_one()
-            .unwrap()
-            .value()
-            .attr("value")
-            .unwrap()
-            .to_string();
-        Ok((nonce, nonce_key))
+            .get_attr("value")
+            .unwrap();
+        Ok((encode(nonce).to_string(), nonce_key.to_string()))
     }
     pub async fn get<T: DeserializeOwned>(&self, url: &str) -> Result<T> {
         let resp = self
@@ -200,11 +194,7 @@ impl NanoFab {
             .client
             .post(url)
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(
-                body.into_iter()
-                    .map(|(k, v)| format!("{}={}", k.as_ref(), v.as_ref()))
-                    .join("&"),
-            )
+            .body(body.into_iter().map(|(k, v)| format!("{}={}", k.as_ref(), v.as_ref())).join("&"))
             .send()
             .await
             .context("Failed to send post request")?
@@ -221,23 +211,7 @@ impl NanoFab {
     }
 }
 
-async fn retry<F, T>(mut f: impl FnMut() -> F, retries: usize) -> Result<T>
-where
-    F: Future<Output = Result<T>>,
-{
-    let mut retry_count = 0;
-    loop {
-        match f().await {
-            ok @ Ok(_) => break ok,
-            err @ Err(_) if retry_count >= retries => {
-                break err.with_context(|| format!("Failed {retries} times"))
-            }
-            _ => {}
-        }
-        retry_count += 1;
-    }
-}
-fn parse_inject_year(datetime_string: &str, fmt: &str) -> Result<NaiveDateTime> {
+fn parse_yearless(datetime_string: &str, fmt: &str) -> Result<NaiveDateTime> {
     let fmt_with_year = fmt.to_string() + " %Y";
     let current_year = chrono::Local::now()
         .format("%Y")
@@ -281,4 +255,10 @@ pub struct PostResponse {
     error: bool,
     #[serde(alias = "location")]
     msg: String,
+}
+
+#[derive(Debug)]
+pub struct Project {
+    name: String,
+    id: String,
 }

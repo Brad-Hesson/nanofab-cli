@@ -261,6 +261,6 @@ pub struct PostResponse {
 
 #[derive(Debug)]
 pub struct Project {
-    name: String,
+    pub name: String,
     id: String,
 }

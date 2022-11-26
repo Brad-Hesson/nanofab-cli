@@ -1,20 +1,19 @@
+use anyhow::anyhow;
+use nom::{
+    branch::alt,
+    bytes::complete::{is_not, tag, take_until},
+    character::complete::{alpha1, alphanumeric1, char, multispace1},
+    combinator::{map, opt, recognize, verify},
+    error::{ContextError, ParseError, VerboseError},
+    multi::{many0, many1, separated_list0},
+    sequence::{delimited, pair, preceded, terminated},
+    IResult,
+};
 use std::{
     collections::BTreeMap,
     fmt::Display,
     option::Option,
     str::{pattern::Pattern, FromStr},
-};
-
-use anyhow::anyhow;
-use nom::{
-    branch::alt,
-    bytes::complete::{is_not, tag, take_until},
-    character::complete::{alpha1, alphanumeric1, char, multispace0, multispace1},
-    combinator::{map, opt, recognize, verify},
-    error::{context, ContextError, ParseError, VerboseError},
-    multi::{many0, separated_list0},
-    sequence::{delimited, pair, preceded, terminated},
-    IResult,
 };
 
 #[derive(Debug, Clone)]
@@ -35,11 +34,11 @@ impl Element {
             None => self.attrs.iter().any(|(k, v)| k.find(key).is_some() & v.is_empty()),
         }
     }
+    pub fn iter_contents(&self) -> impl Iterator<Item = &Content> {
+        self.contents.iter()
+    }
     pub fn iter_children(&self) -> impl Iterator<Item = &Element> {
-        self.contents.iter().filter_map(|c| match c {
-            Content::Text(_) => None,
-            Content::Element(elem) => Some(elem),
-        })
+        self.iter_contents().filter_map(|c| c.as_ref_element())
     }
     pub fn iter_decendents<'s>(&'s self) -> Box<dyn Iterator<Item = &Element> + 's> {
         Box::new(
@@ -48,8 +47,11 @@ impl Element {
                 .flatten(),
         )
     }
-    pub fn iter_contents(&self) -> impl Iterator<Item = &Content> {
-        self.contents.iter()
+    pub fn into_iter_contents(self) -> impl Iterator<Item = Content> {
+        self.contents.into_iter()
+    }
+    pub fn into_iter_children(self) -> impl Iterator<Item = Element> {
+        self.into_iter_contents().filter_map(|c| c.as_element())
     }
 }
 impl Display for Element {
@@ -96,6 +98,18 @@ impl Content {
             Content::Element(elem) => Some(elem),
         }
     }
+    pub fn as_ref_text(&self) -> Option<&str> {
+        match self {
+            Content::Text(t) => Some(t),
+            Content::Element(_) => None,
+        }
+    }
+    pub fn as_ref_element(&self) -> Option<&Element> {
+        match self {
+            Content::Text(_) => None,
+            Content::Element(elem) => Some(elem),
+        }
+    }
 }
 impl Display for Content {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -117,12 +131,10 @@ fn xml_element<'i, E>(i: &'i str) -> IResult<&str, Element, E>
 where
     E: ContextError<&'i str> + ParseError<&'i str>,
 {
-    let (i, first_tag) = verify(xml_tag, |tag| !tag.is_close)(i)?;
-    let name = first_tag.name;
-    let attrs = first_tag.attrs;
+    let (i, Tag { name, attrs, .. }) = verify(xml_tag, |t| !t.is_close)(i)?;
+    let close_tag_p = verify(preceded(xml_multispace0, xml_tag), |t| t.is_close && t.name == name);
     let i_before = i;
-    let close_p = verify(preceded(multispace0, xml_tag), |tag| tag.is_close && tag.name == name);
-    let (i_after, maybe_contents) = opt(terminated(many0(xml_content), close_p))(i)?;
+    let (i_after, maybe_contents) = opt(terminated(many0(xml_content), close_tag_p))(i)?;
     let (i, contents) = match maybe_contents {
         Some(contents) => (i_after, contents),
         None => (i_before, vec![]),
@@ -137,35 +149,53 @@ where
     let to_trim_string = |s: &str| s.trim().to_string();
     let not_empty = |s: &str| !s.is_empty();
     let trim_text_p = verify(map(is_not("<"), to_trim_string), not_empty);
-    let element_p = delimited(multispace0, xml_element, multispace0);
-    let content_p = alt((map(element_p, Content::Element), map(trim_text_p, Content::Text)));
-    context("Failed to parse XML content", content_p)(i)
+    let element_p = delimited(xml_multispace0, xml_element, xml_multispace0);
+    alt((map(element_p, Content::Element), map(trim_text_p, Content::Text)))(i)
 }
 
 fn xml_tag<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, Tag, E> {
+    let attrs_p = separated_list0(xml_multispace1, xml_attr);
     let (i, _) = char('<')(i)?;
     let (i, start_slash) = opt(char('/'))(i)?;
-    let (i, name) = map(xml_name, |s| s.to_string())(i)?;
-    let attrs_p = preceded(multispace1, separated_list0(multispace1, xml_attr));
-    let (i, attrs_vec) = map(opt(attrs_p), Option::unwrap_or_default)(i)?;
-    let (i, _) = multispace0(i)?;
-    let attrs = attrs_vec.into_iter().collect();
+    let (i, name_str) = xml_name(i)?;
+    let (i, _) = xml_multispace0(i)?;
+    let (i, maybe_attrs_vec) = opt(attrs_p)(i)?;
+    let (i, _) = xml_multispace0(i)?;
     let (i, _) = opt(char('/'))(i)?;
     let (i, _) = char('>')(i)?;
-    Ok((i, Tag { name, attrs, is_close: start_slash.is_some() }))
+    let name = name_str.to_string();
+    let attrs = maybe_attrs_vec.unwrap_or_default().into_iter().collect();
+    let is_close = start_slash.is_some();
+    Ok((i, Tag { name, attrs, is_close }))
 }
 
 fn xml_attr<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, (String, String), E> {
-    let (i, name) = xml_name(i)?;
     let value_p = delimited(tag("=\""), take_until("\""), tag("\""));
-    let (i, value) = map(opt(value_p), Option::unwrap_or_default)(i)?;
-    Ok((i, (name.to_string(), value.to_string())))
+    let (i, name_str) = xml_name(i)?;
+    let (i, maybe_value_str) = opt(value_p)(i)?;
+    let name = name_str.to_string();
+    let value = maybe_value_str.unwrap_or_default().to_string();
+    Ok((i, (name, value)))
 }
 
 fn xml_name<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, &str, E> {
     let start_p = alt((alpha1, tag("_")));
     let rest_p = alt((alphanumeric1, tag("-"), tag("_"), tag(".")));
     recognize(pair(start_p, many0(rest_p)))(i)
+}
+
+fn xml_multispace1<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, &str, E> {
+    recognize(many1(alt((multispace1, xml_comment))))(i)
+}
+
+fn xml_multispace0<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, &str, E> {
+    recognize(many0(alt((multispace1, xml_comment))))(i)
+}
+
+fn xml_comment<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, &str, E> {
+    let start = "<!--";
+    let end = "-->";
+    delimited(tag(start), take_until(end), tag(end))(i)
 }
 
 #[cfg(test)]

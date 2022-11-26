@@ -63,6 +63,7 @@ async fn run_ui() -> Result<()> {
         let mut options = vec![];
         options.push("List Tool Openings");
         options.push("List User Bookings");
+        options.push("List User Projects");
         if login_filepath.exists() {
             options.push("Delete Saved Login");
         }
@@ -83,12 +84,36 @@ async fn run_ui() -> Result<()> {
                 "List Tool Openings" => list_tool_openings(&client).await,
                 "List User Bookings" => list_user_bookings(&client).await,
                 "Delete Saved Login" => delete_saved_login(&login_filepath),
+                "List User Projects" => list_user_projects(&client).await,
                 selection => bail!("`{selection}` is not implemented"),
             };
             if let Err(err) = res {
                 display_error_msg(err)?;
             }
         };
+    }
+    Ok(())
+}
+
+async fn list_user_projects(client: &NanoFab) -> Result<()> {
+    let projects = client.get_user_projects().await?;
+    loop {
+        stdout().queue(cursor::Hide)?.queue(cursor::MoveTo(0, 0))?;
+        for project in &projects {
+            stdout()
+                .queue(style::Print(format!("{:?}", project)))?
+                .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?
+                .queue(cursor::MoveDown(1))?
+                .queue(cursor::MoveToColumn(0))?;
+        }
+        stdout().queue(terminal::Clear(terminal::ClearType::FromCursorDown))?.flush()?;
+        let event = event::read()?;
+        #[allow(clippy::if_same_then_else)]
+        if event.is_key(KeyCode::Enter) {
+            break;
+        } else if event.is_key(KeyCode::Esc) {
+            break;
+        }
     }
     Ok(())
 }

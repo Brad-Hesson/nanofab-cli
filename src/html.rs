@@ -6,10 +6,10 @@ use nom::{
     combinator::{map, opt, recognize, verify},
     error::{ContextError, ParseError, VerboseError},
     multi::{many0, many1, separated_list0},
-    sequence::{delimited, pair, preceded, terminated},
+    sequence::{delimited, pair, terminated},
     IResult,
 };
-use std::{collections::BTreeMap, fmt::Display, option::Option, str::FromStr};
+use std::{collections::BTreeMap, fmt::Display, option::Option, ptr::addr_of, str::FromStr};
 
 #[derive(Debug, Clone)]
 enum MaybeParsed<T> {
@@ -23,7 +23,7 @@ impl<T> MaybeParsed<T> {
             MaybeParsed::Parsed(inner) => Some(inner),
         }
     }
-    fn as_mut_parsed(&mut self) -> Option<&mut T> {
+    fn as_ref_parsed(&self) -> Option<&T> {
         match self {
             MaybeParsed::NotParsed(_) => None,
             MaybeParsed::Parsed(inner) => Some(inner),
@@ -47,48 +47,43 @@ impl Element {
     pub fn get_attr(&self, key: &str) -> Option<&str> {
         self.attrs.get(key).map(|s| s.as_str())
     }
-    pub fn iter_contents(&mut self) -> impl Iterator<Item = &mut Content> {
-        self.force_parse();
-        self.contents.as_mut_parsed().expect("Just parsed").iter_mut()
+    pub fn iter_contents(&self) -> impl Iterator<Item = &Content> {
+        unsafe { self.force_parse() };
+        self.contents.as_ref_parsed().expect("Just parsed").iter()
     }
-    pub fn iter_children(&mut self) -> impl Iterator<Item = &mut Element> {
-        self.iter_contents().filter_map(|c| c.as_mut_element())
+    pub fn iter_children(&self) -> impl Iterator<Item = &Element> {
+        self.iter_contents().filter_map(|c| c.as_ref_element())
     }
-    pub fn iter_decendents<'a>(&'a mut self) -> Box<dyn Iterator<Item = &mut Element> + 'a> {
-        fn foo(elem: &mut Element) -> impl Iterator<Item = &mut Element> {
-            let elem_ptr: *mut Element = elem;
-            let decendents_iter = unsafe { elem_ptr.as_mut() }.unwrap().iter_decendents();
-            Some(elem).into_iter().chain(decendents_iter)
-        }
-        Box::new(self.iter_children().map(foo).flatten())
+    pub fn iter_decendents<'a>(&'a self) -> Box<dyn Iterator<Item = &Element> + 'a> {
+        Box::new(
+            self.iter_children()
+                .map(|elem| Some(elem).into_iter().chain(elem.iter_decendents()))
+                .flatten(),
+        )
     }
-    pub fn into_iter_contents(mut self) -> impl Iterator<Item = Content> {
-        self.force_parse();
+    pub fn into_iter_contents(self) -> impl Iterator<Item = Content> {
+        unsafe { self.force_parse() };
         self.contents.as_parsed().expect("Just parsed").into_iter()
     }
     pub fn into_iter_children(self) -> impl Iterator<Item = Element> {
         self.into_iter_contents().filter_map(|c| c.as_element())
     }
-    fn force_parse(&mut self) {
+    unsafe fn force_parse(&self) {
         let Some(i) = self.contents.as_ref_unparsed()else{return};
-        let (_, contents) = many0(xml_content::<()>)(&i).unwrap();
-        self.contents = MaybeParsed::Parsed(contents);
+        let (_, contents) = many0(xml_content::<()>)(i).unwrap();
+        let contents_ptr = addr_of!(self.contents) as *mut _;
+        *contents_ptr = MaybeParsed::Parsed(contents);
     }
 }
 impl Display for Element {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Element").field("name", &self.name).field("attrs", &self.attrs).finish()?;
-        match &self.contents {
-            MaybeParsed::NotParsed(_) => f.write_str("\n|   ...")?,
-            MaybeParsed::Parsed(contents) => {
-                for content in contents {
-                    let disp = format!("{}", content);
-                    let lines = disp.lines();
-                    for line in lines {
-                        f.write_str("\n|   ")?;
-                        f.write_str(line)?;
-                    }
-                }
+        for content in self.iter_contents() {
+            let disp = format!("{}", content);
+            let lines = disp.lines();
+            for line in lines {
+                f.write_str("\n|   ")?;
+                f.write_str(line)?;
             }
         }
         Ok(())
@@ -105,12 +100,12 @@ impl FromStr for Element {
         }
     }
 }
-pub trait ElementIter<'e>: Iterator<Item = &'e mut Element> + Sized + 'e {
+pub trait ElementIter<'e>: Iterator<Item = &'e Element> + Sized + 'e {
     fn filter_attr(
         self,
         key: &'e str,
         value_predicate: impl Fn(&str) -> bool + 'e,
-    ) -> Box<dyn Iterator<Item = &mut Element> + 'e> {
+    ) -> Box<dyn Iterator<Item = &Element> + 'e> {
         Box::new(self.filter(
             move |elem| matches!(elem.get_attr(key), Some(value) if value_predicate(value)),
         ))
@@ -119,11 +114,11 @@ pub trait ElementIter<'e>: Iterator<Item = &'e mut Element> + Sized + 'e {
         &mut self,
         key: &'e str,
         value_predicate: impl Fn(&str) -> bool,
-    ) -> Option<&'e mut Element> {
+    ) -> Option<&'e Element> {
         self.find(|elem| matches!(elem.get_attr(key), Some(value) if value_predicate(value)))
     }
 }
-impl<'e, I> ElementIter<'e> for I where I: Iterator<Item = &'e mut Element> + 'e {}
+impl<'e, I> ElementIter<'e> for I where I: Iterator<Item = &'e Element> + 'e {}
 
 #[derive(Debug, Clone)]
 pub enum Content {
@@ -143,13 +138,13 @@ impl Content {
             Content::Element(elem) => Some(elem),
         }
     }
-    pub fn as_mut_text(&mut self) -> Option<&mut str> {
+    pub fn as_ref_text(&self) -> Option<&str> {
         match self {
             Content::Text(t) => Some(t),
             Content::Element(_) => None,
         }
     }
-    pub fn as_mut_element(&mut self) -> Option<&mut Element> {
+    pub fn as_ref_element(&self) -> Option<&Element> {
         match self {
             Content::Text(_) => None,
             Content::Element(elem) => Some(elem),

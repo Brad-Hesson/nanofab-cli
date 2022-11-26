@@ -9,12 +9,7 @@ use nom::{
     sequence::{delimited, pair, preceded, terminated},
     IResult,
 };
-use std::{
-    collections::BTreeMap,
-    fmt::Display,
-    option::Option,
-    str::{pattern::Pattern, FromStr},
-};
+use std::{collections::BTreeMap, fmt::Display, option::Option, str::FromStr};
 
 #[derive(Debug, Clone)]
 pub struct Element {
@@ -25,14 +20,6 @@ pub struct Element {
 impl Element {
     pub fn get_attr(&self, key: &str) -> Option<&str> {
         self.attrs.get(key).map(|s| s.as_str())
-    }
-    pub fn has_attr<'k, P: Pattern<'k> + Copy>(&'k self, key: P, value: Option<P>) -> bool {
-        match value {
-            Some(v_pat) => {
-                self.attrs.iter().any(|(k, v)| k.find(key).is_some() & v.find(v_pat).is_some())
-            }
-            None => self.attrs.iter().any(|(k, v)| k.find(key).is_some() & v.is_empty()),
-        }
     }
     pub fn iter_contents(&self) -> impl Iterator<Item = &Content> {
         self.contents.iter()
@@ -79,6 +66,25 @@ impl FromStr for Element {
         }
     }
 }
+pub trait ElementIter<'e>: Iterator<Item = &'e Element> + Sized + 'e {
+    fn filter_attr(
+        self,
+        key: &'e str,
+        value_predicate: impl Fn(&str) -> bool + 'e,
+    ) -> Box<dyn Iterator<Item = &Element> + 'e> {
+        Box::new(self.filter(
+            move |elem| matches!(elem.get_attr(key), Some(value) if value_predicate(value)),
+        ))
+    }
+    fn find_attr(
+        &mut self,
+        key: &'e str,
+        value_predicate: impl Fn(&str) -> bool,
+    ) -> Option<&'e Element> {
+        self.find(|elem| matches!(elem.get_attr(key), Some(value) if value_predicate(value)))
+    }
+}
+impl<'e, I> ElementIter<'e> for I where I: Iterator<Item = &'e Element> + 'e {}
 
 #[derive(Debug, Clone)]
 pub enum Content {

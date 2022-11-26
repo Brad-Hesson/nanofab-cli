@@ -1,4 +1,3 @@
-#![feature(pattern)]
 mod html;
 mod nanofab;
 mod schedule;

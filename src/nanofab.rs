@@ -1,5 +1,5 @@
 use crate::{
-    html::Element,
+    html::{Content, Element, ElementIter},
     schedule::{TimeSlot, TimeTable},
 };
 
@@ -50,13 +50,12 @@ impl NanoFab {
             .parse::<Element>()?;
         let projects = root
             .iter_decendents()
-            .find(|elem| elem.has_attr("id", Some("sel_project_id")))
+            .find_attr("id", |v| v == "sel_project_id")
             .unwrap()
             .iter_children()
-            .filter(|elem| elem.has_attr("class", None))
+            .filter_attr("class", |v| v == "")
             .map(|elem| {
-                let name =
-                    elem.iter_contents().cloned().exactly_one().ok().unwrap().as_text().unwrap();
+                let name = elem.iter_contents().find_map(Content::as_ref_text).unwrap().to_string();
                 let id = elem.get_attr("value").unwrap().to_string();
                 Project { name, id }
             })
@@ -85,13 +84,12 @@ impl NanoFab {
             .await?
             .parse::<Element>()?;
         let mut bookings = vec![];
-        for booking_elem in
-            root.iter_decendents().filter(|elem| elem.has_attr("id", Some("booking-")))
+        for booking_elem in root.iter_decendents().filter_attr("id", |v| v.starts_with("booking-"))
         {
             let (name_str, time_str) = booking_elem
                 .iter_decendents()
-                .filter(|elem| elem.has_attr("class", Some("columns")))
-                .map(|elem| elem.iter_contents().cloned().find_map(|c| c.as_text()).unwrap())
+                .filter_attr("class", |v| v == "columns")
+                .map(|elem| elem.iter_contents().find_map(|c| c.as_ref_text()).unwrap())
                 .collect_tuple()
                 .unwrap();
             let name = name_str.trim().to_string();
@@ -137,8 +135,7 @@ impl NanoFab {
             .await?
             .parse::<Element>()?;
         let mut bookings = vec![];
-        for booking_elem in
-            root.iter_decendents().filter(|elem| elem.has_attr("id", Some("booking-")))
+        for booking_elem in root.iter_decendents().filter_attr("id", |v| v.starts_with("booking-"))
         {
             let (start_str, end_str, name_str) = booking_elem
                 .iter_decendents()
@@ -163,13 +160,13 @@ impl NanoFab {
         let root = self.post(url, [("load", modal)]).await?.parse::<Element>()?;
         let nonce = root
             .iter_decendents()
-            .find(|elem| elem.has_attr("name", Some("nonce")))
+            .find_attr("name", |v| v == "nonce")
             .unwrap()
             .get_attr("value")
             .unwrap();
         let nonce_key = root
             .iter_decendents()
-            .find(|elem| elem.has_attr("name", Some("nonce_key")))
+            .find_attr("name", |v| v == "nonce_key")
             .unwrap()
             .get_attr("value")
             .unwrap();
@@ -236,7 +233,6 @@ fn parse_yearless(datetime_string: &str, fmt: &str) -> Result<NaiveDateTime> {
     Err(anyhow!("Could not find year for `{datetime_string}`"))
 }
 
-#[non_exhaustive]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Tool {
     pub label: String,
@@ -246,7 +242,6 @@ pub struct Tool {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[non_exhaustive]
 pub struct Login {
     pub username: String,
     pub password: String,
@@ -262,5 +257,5 @@ pub struct PostResponse {
 #[derive(Debug)]
 pub struct Project {
     pub name: String,
-    id: String,
+    pub id: String,
 }

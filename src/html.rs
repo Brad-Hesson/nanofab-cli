@@ -12,44 +12,83 @@ use nom::{
 use std::{collections::BTreeMap, fmt::Display, option::Option, str::FromStr};
 
 #[derive(Debug, Clone)]
+enum MaybeParsed<T> {
+    NotParsed(String),
+    Parsed(T),
+}
+impl<T> MaybeParsed<T> {
+    fn as_parsed(self) -> Option<T> {
+        match self {
+            MaybeParsed::NotParsed(_) => None,
+            MaybeParsed::Parsed(inner) => Some(inner),
+        }
+    }
+    fn as_mut_parsed(&mut self) -> Option<&mut T> {
+        match self {
+            MaybeParsed::NotParsed(_) => None,
+            MaybeParsed::Parsed(inner) => Some(inner),
+        }
+    }
+    fn as_ref_unparsed(&self) -> Option<&str> {
+        match self {
+            MaybeParsed::NotParsed(s) => Some(s),
+            MaybeParsed::Parsed(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Element {
     name: String,
     attrs: BTreeMap<String, String>,
-    contents: Vec<Content>,
+    contents: MaybeParsed<Vec<Content>>,
 }
 impl Element {
     pub fn get_attr(&self, key: &str) -> Option<&str> {
         self.attrs.get(key).map(|s| s.as_str())
     }
-    pub fn iter_contents(&self) -> impl Iterator<Item = &Content> {
-        self.contents.iter()
+    pub fn iter_contents(&mut self) -> impl Iterator<Item = &mut Content> {
+        self.force_parse();
+        self.contents.as_mut_parsed().expect("Just parsed").iter_mut()
     }
-    pub fn iter_children(&self) -> impl Iterator<Item = &Element> {
-        self.iter_contents().filter_map(|c| c.as_ref_element())
+    pub fn iter_children(&mut self) -> impl Iterator<Item = &mut Element> {
+        self.iter_contents().filter_map(|c| c.as_mut_element())
     }
-    pub fn iter_decendents<'s>(&'s self) -> Box<dyn Iterator<Item = &Element> + 's> {
-        Box::new(
-            self.iter_children()
-                .map(|elem| Some(elem).into_iter().chain(elem.iter_decendents()))
-                .flatten(),
-        )
+    pub fn iter_decendents<'a>(&'a mut self) -> Box<dyn Iterator<Item = &mut Element> + 'a> {
+        fn foo(elem: &mut Element) -> impl Iterator<Item = &mut Element> {
+            let elem_ptr: *mut Element = elem;
+            let decendents_iter = unsafe { elem_ptr.as_mut() }.unwrap().iter_decendents();
+            Some(elem).into_iter().chain(decendents_iter)
+        }
+        Box::new(self.iter_children().map(foo).flatten())
     }
-    pub fn into_iter_contents(self) -> impl Iterator<Item = Content> {
-        self.contents.into_iter()
+    pub fn into_iter_contents(mut self) -> impl Iterator<Item = Content> {
+        self.force_parse();
+        self.contents.as_parsed().expect("Just parsed").into_iter()
     }
     pub fn into_iter_children(self) -> impl Iterator<Item = Element> {
         self.into_iter_contents().filter_map(|c| c.as_element())
+    }
+    fn force_parse(&mut self) {
+        let Some(i) = self.contents.as_ref_unparsed()else{return};
+        let (_, contents) = many0(xml_content::<()>)(&i).unwrap();
+        self.contents = MaybeParsed::Parsed(contents);
     }
 }
 impl Display for Element {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Element").field("name", &self.name).field("attrs", &self.attrs).finish()?;
-        for content in &self.contents {
-            let disp = format!("{}", content);
-            let lines = disp.lines();
-            for line in lines {
-                f.write_str("\n|   ")?;
-                f.write_str(line)?;
+        match &self.contents {
+            MaybeParsed::NotParsed(_) => f.write_str("\n|   ...")?,
+            MaybeParsed::Parsed(contents) => {
+                for content in contents {
+                    let disp = format!("{}", content);
+                    let lines = disp.lines();
+                    for line in lines {
+                        f.write_str("\n|   ")?;
+                        f.write_str(line)?;
+                    }
+                }
             }
         }
         Ok(())
@@ -66,12 +105,12 @@ impl FromStr for Element {
         }
     }
 }
-pub trait ElementIter<'e>: Iterator<Item = &'e Element> + Sized + 'e {
+pub trait ElementIter<'e>: Iterator<Item = &'e mut Element> + Sized + 'e {
     fn filter_attr(
         self,
         key: &'e str,
         value_predicate: impl Fn(&str) -> bool + 'e,
-    ) -> Box<dyn Iterator<Item = &Element> + 'e> {
+    ) -> Box<dyn Iterator<Item = &mut Element> + 'e> {
         Box::new(self.filter(
             move |elem| matches!(elem.get_attr(key), Some(value) if value_predicate(value)),
         ))
@@ -80,11 +119,11 @@ pub trait ElementIter<'e>: Iterator<Item = &'e Element> + Sized + 'e {
         &mut self,
         key: &'e str,
         value_predicate: impl Fn(&str) -> bool,
-    ) -> Option<&'e Element> {
+    ) -> Option<&'e mut Element> {
         self.find(|elem| matches!(elem.get_attr(key), Some(value) if value_predicate(value)))
     }
 }
-impl<'e, I> ElementIter<'e> for I where I: Iterator<Item = &'e Element> + 'e {}
+impl<'e, I> ElementIter<'e> for I where I: Iterator<Item = &'e mut Element> + 'e {}
 
 #[derive(Debug, Clone)]
 pub enum Content {
@@ -104,13 +143,13 @@ impl Content {
             Content::Element(elem) => Some(elem),
         }
     }
-    pub fn as_ref_text(&self) -> Option<&str> {
+    pub fn as_mut_text(&mut self) -> Option<&mut str> {
         match self {
             Content::Text(t) => Some(t),
             Content::Element(_) => None,
         }
     }
-    pub fn as_ref_element(&self) -> Option<&Element> {
+    pub fn as_mut_element(&mut self) -> Option<&mut Element> {
         match self {
             Content::Text(_) => None,
             Content::Element(elem) => Some(elem),
@@ -138,12 +177,12 @@ where
     E: ContextError<&'i str> + ParseError<&'i str>,
 {
     let (i, Tag { name, attrs, .. }) = verify(xml_tag, |t| !t.is_close)(i)?;
-    let close_tag_p = verify(preceded(xml_multispace0, xml_tag), |t| t.is_close && t.name == name);
+    let close_tag_p = verify(xml_tag, |t| t.is_close && t.name == name);
     let i_before = i;
-    let (i_after, maybe_contents) = opt(terminated(many0(xml_content), close_tag_p))(i)?;
+    let (i_after, maybe_contents) = opt(terminated(recognize(many0(xml_content)), close_tag_p))(i)?;
     let (i, contents) = match maybe_contents {
-        Some(contents) => (i_after, contents),
-        None => (i_before, vec![]),
+        Some(contents) => (i_after, MaybeParsed::NotParsed(contents.into())),
+        None => (i_before, MaybeParsed::Parsed(vec![])),
     };
     Ok((i, Element { name, attrs, contents }))
 }
@@ -215,22 +254,27 @@ mod tests {
 
     #[test]
     fn test_parse_xml() {
-        let start = std::time::Instant::now();
-        let (rest, elem) = xml_element::<VerboseError<&str>>(TEST2).unwrap();
-        let end = std::time::Instant::now();
-        // println!("Rest: `{rest}`");
-        println!("{elem}");
-        println!("{:?}", end - start);
-        let size = elem.iter_decendents().map(|elem| size_of_val(elem)).sum::<usize>();
-        println!("Size: {size}");
-        // let pretty = format!("{elem}");
+        let (rest, mut root) = xml_element::<VerboseError<&str>>(TEST2).unwrap();
+        root.iter_children().for_each(|elem| elem.iter_children().for_each(|_| ()));
+        println!("{root}");
+        println!("Rest: `{rest}`");
+        // let pretty = format!("{root}");
+        // assert_eq!(rest, "");
+        // assert_eq!(pretty, RESULT1);
+    }
+    #[test]
+    fn test_into_iter_contents() {
+        let (rest, root) = xml_element::<VerboseError<&str>>(TEST2).unwrap();
+        println!("{:#?}", root.into_iter_contents().collect_vec());
+        println!("Rest: `{rest}`");
+        // let pretty = format!("{root}");
         // assert_eq!(rest, "");
         // assert_eq!(pretty, RESULT1);
     }
 
     #[test]
     fn test_iter_decendents() {
-        let (_, root) = xml_element::<VerboseError<&str>>(TEST1).unwrap();
+        let (_, mut root) = xml_element::<VerboseError<&str>>(TEST1).unwrap();
         let children = root.iter_decendents().map(|elem| (&elem.name, &elem.attrs)).collect_vec();
         for child in children {
             println!("{child:?}");

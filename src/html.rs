@@ -12,11 +12,11 @@ use nom::{
 use std::{collections::BTreeMap, fmt::Display, option::Option, ptr::addr_of, str::FromStr};
 
 #[derive(Debug, Clone)]
-enum MaybeParsed<T> {
-    NotParsed(String),
+enum MaybeParsed<S, T> {
+    NotParsed(S),
     Parsed(T),
 }
-impl<T> MaybeParsed<T> {
+impl<S, T> MaybeParsed<S, T> {
     fn as_parsed(self) -> Option<T> {
         match self {
             MaybeParsed::NotParsed(_) => None,
@@ -29,7 +29,7 @@ impl<T> MaybeParsed<T> {
             MaybeParsed::Parsed(inner) => Some(inner),
         }
     }
-    fn as_ref_unparsed(&self) -> Option<&str> {
+    fn as_ref_unparsed(&self) -> Option<&S> {
         match self {
             MaybeParsed::NotParsed(s) => Some(s),
             MaybeParsed::Parsed(_) => None,
@@ -41,7 +41,7 @@ impl<T> MaybeParsed<T> {
 pub struct Element {
     name: String,
     attrs: BTreeMap<String, String>,
-    contents: MaybeParsed<Vec<Content>>,
+    contents: MaybeParsed<String, Vec<Content>>,
 }
 impl Element {
     pub fn get_attr(&self, key: &str) -> Option<&str> {
@@ -71,7 +71,7 @@ impl Element {
     unsafe fn force_parse(&self) {
         let Some(i) = self.contents.as_ref_unparsed()else{return};
         let (_, contents) = many0(xml_content::<()>)(i).unwrap();
-        let contents_ptr = addr_of!(self.contents) as *mut _;
+        let contents_ptr = addr_of!(self.contents) as *mut MaybeParsed<String, _>;
         *contents_ptr = MaybeParsed::Parsed(contents);
     }
 }

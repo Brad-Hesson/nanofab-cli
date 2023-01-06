@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
         .execute(event::EnableMouseCapture)?;
     let res = run_ui().await;
     crossterm::terminal::disable_raw_mode()?;
-    stdout().execute(crossterm::terminal::LeaveAlternateScreen)?.queue(cursor::Show)?;
+    stdout().execute(crossterm::terminal::LeaveAlternateScreen)?.execute(cursor::Show)?;
     res
 }
 

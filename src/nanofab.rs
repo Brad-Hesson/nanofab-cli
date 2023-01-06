@@ -88,7 +88,7 @@ impl NanoFab {
         {
             let (name_str, time_str) = booking_elem
                 .iter_decendents()
-                .filter_attr("class", |v| v == "columns")
+                .filter_attr("class", |v| v == "columns small-6")
                 .map(|elem| elem.iter_contents().find_map(|c| c.as_ref_text()).unwrap())
                 .collect_tuple()
                 .unwrap();

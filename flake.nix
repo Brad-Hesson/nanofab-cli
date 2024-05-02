@@ -1,22 +1,27 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
   };
-  outputs = flakes:
+  outputs = flakes: flakes.flake-utils.lib.eachDefaultSystem (system:
     let
-      system = "x86_64-linux";
       pkgs = import flakes.nixpkgs {
         inherit system;
         config.allowUnfree = true;
       };
     in
     {
-      devShells.${system}.default = pkgs.mkShell {
+      devShells.${system}.default = with pkgs; mkShell {
         packages = [
-          pkgs.bashInteractive
-          pkgs.rustup
+          bashInteractive
+          rustup
+        ];
+        buildInputs = [
+          pkg-config
+          openssl.dev
         ];
       };
-    };
+    }
+  );
 }
 

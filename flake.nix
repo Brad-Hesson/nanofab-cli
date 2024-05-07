@@ -11,7 +11,7 @@
       };
     in
     {
-      devShells.default = with pkgs; mkShell {
+      devShell = with pkgs; mkShell {
         packages = [
           rustup
         ];

@@ -9,7 +9,7 @@ use nom::{
     sequence::{delimited, pair, terminated},
     IResult,
 };
-use std::{collections::BTreeMap, fmt::Display, option::Option, ptr::addr_of, str::FromStr};
+use std::{cell::RefCell, collections::BTreeMap, fmt::Display, option::Option, str::FromStr};
 
 #[derive(Debug, Clone)]
 enum MaybeParsed<S, T> {
@@ -41,20 +41,21 @@ impl<S, T> MaybeParsed<S, T> {
 pub struct Element {
     name: String,
     attrs: BTreeMap<String, String>,
-    contents: MaybeParsed<String, Vec<Content>>,
+    contents: RefCell<MaybeParsed<String, Vec<Content>>>,
 }
 impl Element {
     pub fn get_attr(&self, key: &str) -> Option<&str> {
         self.attrs.get(key).map(|s| s.as_str())
     }
     pub fn iter_contents(&self) -> impl Iterator<Item = &Content> {
-        unsafe { self.force_parse() };
-        self.contents.as_ref_parsed().expect("Just parsed").iter()
+        self.force_parse();
+        let b = unsafe { self.contents.try_borrow_unguarded().unwrap() };
+        b.as_ref_parsed().expect("Just parsed").iter()
     }
     pub fn iter_children(&self) -> impl Iterator<Item = &Element> {
         self.iter_contents().filter_map(|c| c.as_ref_element())
     }
-    pub fn iter_decendents<'a>(&'a self) -> Box<dyn Iterator<Item = &Element> + 'a> {
+    pub fn iter_decendents<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Element> + 'a> {
         Box::new(
             self.iter_children()
                 .map(|elem| Some(elem).into_iter().chain(elem.iter_decendents()))
@@ -62,22 +63,32 @@ impl Element {
         )
     }
     pub fn into_iter_contents(self) -> impl Iterator<Item = Content> {
-        unsafe { self.force_parse() };
-        self.contents.as_parsed().expect("Just parsed").into_iter()
+        self.force_parse();
+        self.contents
+            .into_inner()
+            .as_parsed()
+            .expect("Just parsed")
+            .into_iter()
     }
     pub fn into_iter_children(self) -> impl Iterator<Item = Element> {
         self.into_iter_contents().filter_map(|c| c.as_element())
     }
-    unsafe fn force_parse(&self) {
-        let Some(i) = self.contents.as_ref_unparsed()else{return};
+    fn force_parse(&self) {
+        let b = self.contents.borrow();
+        let Some(i) = b.as_ref_unparsed() else {
+            return;
+        };
         let (_, contents) = many0(xml_content::<()>)(i).unwrap();
-        let contents_ptr = addr_of!(self.contents) as *mut MaybeParsed<String, _>;
-        *contents_ptr = MaybeParsed::Parsed(contents);
+        drop(b);
+        *self.contents.borrow_mut() = MaybeParsed::Parsed(contents);
     }
 }
 impl Display for Element {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Element").field("name", &self.name).field("attrs", &self.attrs).finish()?;
+        f.debug_struct("Element")
+            .field("name", &self.name)
+            .field("attrs", &self.attrs)
+            .finish()?;
         for content in self.iter_contents() {
             let disp = format!("{}", content);
             let lines = disp.lines();
@@ -167,7 +178,7 @@ struct Tag {
     is_close: bool,
 }
 
-fn xml_element<'i, E>(i: &'i str) -> IResult<&str, Element, E>
+fn xml_element<'i, E>(i: &'i str) -> IResult<&'i str, Element, E>
 where
     E: ContextError<&'i str> + ParseError<&'i str>,
 {
@@ -179,10 +190,17 @@ where
         Some(contents) => (i_after, MaybeParsed::NotParsed(contents.into())),
         None => (i_before, MaybeParsed::Parsed(vec![])),
     };
-    Ok((i, Element { name, attrs, contents }))
+    Ok((
+        i,
+        Element {
+            name,
+            attrs,
+            contents: RefCell::new(contents),
+        },
+    ))
 }
 
-fn xml_content<'i, E>(i: &'i str) -> IResult<&str, Content, E>
+fn xml_content<'i, E>(i: &'i str) -> IResult<&'i str, Content, E>
 where
     E: ContextError<&'i str> + ParseError<&'i str>,
 {
@@ -190,10 +208,13 @@ where
     let not_empty = |s: &str| !s.is_empty();
     let trim_text_p = verify(map(is_not("<"), to_trim_string), not_empty);
     let element_p = delimited(xml_multispace0, xml_element, xml_multispace0);
-    alt((map(element_p, Content::Element), map(trim_text_p, Content::Text)))(i)
+    alt((
+        map(element_p, Content::Element),
+        map(trim_text_p, Content::Text),
+    ))(i)
 }
 
-fn xml_tag<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, Tag, E> {
+fn xml_tag<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, Tag, E> {
     let attrs_p = separated_list0(xml_multispace1, xml_attr);
     let (i, _) = char('<')(i)?;
     let (i, start_slash) = opt(char('/'))(i)?;
@@ -206,10 +227,17 @@ fn xml_tag<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, Tag, E> {
     let name = name_str.to_string();
     let attrs = maybe_attrs_vec.unwrap_or_default().into_iter().collect();
     let is_close = start_slash.is_some();
-    Ok((i, Tag { name, attrs, is_close }))
+    Ok((
+        i,
+        Tag {
+            name,
+            attrs,
+            is_close,
+        },
+    ))
 }
 
-fn xml_attr<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, (String, String), E> {
+fn xml_attr<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, (String, String), E> {
     let value_p = delimited(tag("=\""), take_until("\""), tag("\""));
     let (i, name_str) = xml_name(i)?;
     let (i, maybe_value_str) = opt(value_p)(i)?;
@@ -218,21 +246,21 @@ fn xml_attr<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, (String, St
     Ok((i, (name, value)))
 }
 
-fn xml_name<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, &str, E> {
+fn xml_name<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &str, E> {
     let start_p = alt((alpha1, tag("_")));
     let rest_p = alt((alphanumeric1, tag("-"), tag("_"), tag(".")));
     recognize(pair(start_p, many0(rest_p)))(i)
 }
 
-fn xml_multispace1<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, &str, E> {
+fn xml_multispace1<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &str, E> {
     recognize(many1(alt((multispace1, xml_comment))))(i)
 }
 
-fn xml_multispace0<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, &str, E> {
+fn xml_multispace0<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &str, E> {
     recognize(many0(alt((multispace1, xml_comment))))(i)
 }
 
-fn xml_comment<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&str, &str, E> {
+fn xml_comment<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &str, E> {
     let start = "<!--";
     let end = "-->";
     delimited(tag(start), take_until(end), tag(end))(i)
@@ -250,7 +278,8 @@ mod tests {
     #[test]
     fn test_parse_xml() {
         let (rest, mut root) = xml_element::<VerboseError<&str>>(TEST2).unwrap();
-        root.iter_children().for_each(|elem| elem.iter_children().for_each(|_| ()));
+        root.iter_children()
+            .for_each(|elem| elem.iter_children().for_each(|_| ()));
         println!("{root}");
         println!("Rest: `{rest}`");
         // let pretty = format!("{root}");
@@ -270,7 +299,10 @@ mod tests {
     #[test]
     fn test_iter_decendents() {
         let (_, mut root) = xml_element::<VerboseError<&str>>(TEST1).unwrap();
-        let children = root.iter_decendents().map(|elem| (&elem.name, &elem.attrs)).collect_vec();
+        let children = root
+            .iter_decendents()
+            .map(|elem| (&elem.name, &elem.attrs))
+            .collect_vec();
         for child in children {
             println!("{child:?}");
         }

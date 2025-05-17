@@ -54,20 +54,22 @@ impl NanoFab {
         let projects = root
             .iter_decendents()
             .find_attr("id", |v| v == "sel_project_id")
-            .unwrap()
-            .iter_children()
-            .filter_attr("class", |v| v.is_empty())
+            .context("user projects not found")
             .map(|elem| {
-                let name = elem
-                    .iter_contents()
-                    .find_map(Content::try_as_text)
-                    .unwrap()
-                    .to_string();
-                let id = elem.get_attr("value").unwrap().to_string();
-                Project { name, id }
-            })
-            .collect_vec();
-        Ok(projects)
+                elem.iter_children()
+                    .filter_attr("class", |v| v.is_empty())
+                    .map(|elem| {
+                        let name = elem
+                            .iter_contents()
+                            .find_map(Content::try_as_text)
+                            .unwrap()
+                            .to_string();
+                        let id = elem.get_attr("value").unwrap().to_string();
+                        Project { name, id }
+                    })
+                    .collect_vec()
+            });
+        projects
     }
     pub async fn get_tool_from_label(&self, label: &str) -> Result<Tool> {
         self.get::<Vec<Tool>>(

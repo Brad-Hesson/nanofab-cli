@@ -92,7 +92,7 @@ async fn run_ui() -> Result<()> {
             .flush()?;
         let event = event::read()?;
         if event.updown_driver(&mut selector, options.len() - 1) {
-        } else if event.is_key(KeyCode::Esc) {
+        } else if event.is_key(KeyCode::Esc) || event.is_key(KeyCode::Char('q')) {
             break;
         } else if event.is_key(KeyCode::Enter) {
             let res = match options[selector.unwrap()] {

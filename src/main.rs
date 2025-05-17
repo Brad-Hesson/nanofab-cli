@@ -35,6 +35,7 @@ async fn main() -> Result<()> {
     crossterm::terminal::disable_raw_mode()?;
     stdout()
         .execute(crossterm::terminal::LeaveAlternateScreen)?
+        .execute(event::DisableMouseCapture)?
         .execute(cursor::Show)?;
     res
 }

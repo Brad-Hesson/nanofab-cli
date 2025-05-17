@@ -45,7 +45,10 @@ impl NanoFab {
     pub async fn get_user_projects(&self) -> Result<Vec<Project>> {
         let body = [("load", "modal.tool-booking.php")];
         let root = self
-            .post("https://admin.nanofab.ualberta.ca/ajax.load-modal.php", body)
+            .post(
+                "https://admin.nanofab.ualberta.ca/ajax.load-modal.php",
+                body,
+            )
             .await?
             .parse::<Element>()?;
         let projects = root
@@ -53,9 +56,13 @@ impl NanoFab {
             .find_attr("id", |v| v == "sel_project_id")
             .unwrap()
             .iter_children()
-            .filter_attr("class", |v| v == "")
+            .filter_attr("class", |v| v.is_empty())
             .map(|elem| {
-                let name = elem.iter_contents().find_map(Content::as_ref_text).unwrap().to_string();
+                let name = elem
+                    .iter_contents()
+                    .find_map(Content::try_as_text)
+                    .unwrap()
+                    .to_string();
                 let id = elem.get_attr("value").unwrap().to_string();
                 Project { name, id }
             })
@@ -72,7 +79,7 @@ impl NanoFab {
         .await
         .context("Failed to get tool from server")?
         .into_iter()
-        .find(|tool| &tool.label == label)
+        .find(|tool| tool.label == label)
         .context("No tools match label")
     }
     pub async fn get_user_bookings(&self) -> Result<TimeTable<(String, String)>> {
@@ -84,12 +91,14 @@ impl NanoFab {
             .await?
             .parse::<Element>()?;
         let mut bookings = vec![];
-        for booking_elem in root.iter_decendents().filter_attr("id", |v| v.starts_with("booking-"))
+        for booking_elem in root
+            .iter_decendents()
+            .filter_attr("id", |v| v.starts_with("booking-"))
         {
             let (name_str, time_str) = booking_elem
                 .iter_decendents()
                 .filter_attr("class", |v| v == "columns small-6")
-                .map(|elem| elem.iter_contents().find_map(|c| c.as_ref_text()).unwrap())
+                .map(|elem| elem.iter_contents().find_map(|c| c.try_as_text()).unwrap())
                 .collect_tuple()
                 .unwrap();
             let name = name_str.trim().to_string();
@@ -109,9 +118,9 @@ impl NanoFab {
         self.get_tool_bookings(tool, Some(time.date()), Some(time.date()))
             .await?
             .timeslots()
-            .into_iter()
-            .cloned()
+            .iter()
             .find(|timeslot| timeslot.start() == &Some(time))
+            .cloned()
             .ok_or(anyhow!("Booking not found"))
     }
     pub async fn get_tool_bookings(
@@ -131,11 +140,16 @@ impl NanoFab {
         body.push(("nonce", nonce));
         body.push(("nonce_key", nonce_key));
         let root = self
-            .post("https://admin.nanofab.ualberta.ca/ajax.get-bookings.php", body)
+            .post(
+                "https://admin.nanofab.ualberta.ca/ajax.get-bookings.php",
+                body,
+            )
             .await?
             .parse::<Element>()?;
         let mut bookings = vec![];
-        for booking_elem in root.iter_decendents().filter_attr("id", |v| v.starts_with("booking-"))
+        for booking_elem in root
+            .iter_decendents()
+            .filter_attr("id", |v| v.starts_with("booking-"))
         {
             let (start_str, end_str, name_str) = booking_elem
                 .iter_decendents()
@@ -157,7 +171,10 @@ impl NanoFab {
     }
     pub async fn get_nonce(&self, modal: &str) -> Result<(String, String)> {
         let url = "https://admin.nanofab.ualberta.ca/ajax.load-modal.php";
-        let root = self.post(url, [("load", modal)]).await?.parse::<Element>()?;
+        let root = self
+            .post(url, [("load", modal)])
+            .await?
+            .parse::<Element>()?;
         let nonce = root
             .iter_decendents()
             .find_attr("name", |v| v == "nonce")
@@ -195,7 +212,11 @@ impl NanoFab {
             .client
             .post(url)
             .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(body.into_iter().map(|(k, v)| format!("{}={}", k.as_ref(), v.as_ref())).join("&"))
+            .body(
+                body.into_iter()
+                    .map(|(k, v)| format!("{}={}", k.as_ref(), v.as_ref()))
+                    .join("&"),
+            )
             .send()
             .await
             .context("Failed to send post request")?

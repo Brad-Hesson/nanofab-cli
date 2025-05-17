@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod html;
 mod nanofab;
 mod schedule;
@@ -31,7 +33,9 @@ async fn main() -> Result<()> {
         .execute(event::EnableMouseCapture)?;
     let res = run_ui().await;
     crossterm::terminal::disable_raw_mode()?;
-    stdout().execute(crossterm::terminal::LeaveAlternateScreen)?.execute(cursor::Show)?;
+    stdout()
+        .execute(crossterm::terminal::LeaveAlternateScreen)?
+        .execute(cursor::Show)?;
     res
 }
 
@@ -105,7 +109,9 @@ async fn list_user_projects(client: &NanoFab) -> Result<()> {
                 .queue(cursor::MoveDown(1))?
                 .queue(cursor::MoveToColumn(0))?;
         }
-        stdout().queue(terminal::Clear(terminal::ClearType::FromCursorDown))?.flush()?;
+        stdout()
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
+            .flush()?;
         let event = event::read()?;
         #[allow(clippy::if_same_then_else)]
         if event.is_key(KeyCode::Enter) {
@@ -140,7 +146,9 @@ async fn list_user_bookings(client: &NanoFab) -> Result<()> {
                 .queue(cursor::MoveDown(1))?
                 .queue(cursor::MoveToColumn(0))?;
         }
-        stdout().queue(terminal::Clear(terminal::ClearType::FromCursorDown))?.flush()?;
+        stdout()
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
+            .flush()?;
         let event = event::read()?;
         #[allow(clippy::if_same_then_else)]
         if event.updown_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
@@ -150,18 +158,19 @@ async fn list_user_bookings(client: &NanoFab) -> Result<()> {
         } else if event.is_key(KeyCode::Esc) {
             break;
         } else if let Some((_, rows)) = event.is_resize() {
-            max_lines = (rows as usize).saturating_sub(bottom_gap);
+            max_lines = rows.saturating_sub(bottom_gap);
         }
     }
     Ok(())
 }
 
 async fn list_tool_openings(client: &NanoFab) -> Result<()> {
-    let Some(tool) = user_tool_select(client).await?else{
+    let Some(tool) = user_tool_select(client).await? else {
         return Ok(());
     };
-    let bookings =
-        client.get_tool_bookings(&tool, Some(chrono::Local::now().date_naive()), None).await?;
+    let bookings = client
+        .get_tool_bookings(&tool, Some(chrono::Local::now().date_naive()), None)
+        .await?;
     let mut openings = bookings.inverted();
     openings.subtract_before_now();
     openings.subtract_weekends();
@@ -184,7 +193,9 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
                 .queue(style::Print(line))?
                 .queue(terminal::Clear(terminal::ClearType::UntilNewLine))?;
         }
-        stdout().queue(terminal::Clear(terminal::ClearType::FromCursorDown))?.flush()?;
+        stdout()
+            .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
+            .flush()?;
         let event = event::read()?;
         #[allow(clippy::if_same_then_else)]
         if event.updown_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
@@ -194,7 +205,7 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
         } else if event.is_key(KeyCode::Esc) {
             break;
         } else if let Some((_, rows)) = event.is_resize() {
-            max_lines = (rows as usize).saturating_sub(bottom_gap);
+            max_lines = rows.saturating_sub(bottom_gap);
         }
     }
     Ok(())
@@ -294,7 +305,10 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
     let mut displayed_tools = all_tools.iter().take(max_tools).collect_vec();
 
     loop {
-        let tool_names = displayed_tools.iter().map(|tool| tool.label.as_str()).collect_vec();
+        let tool_names = displayed_tools
+            .iter()
+            .map(|tool| tool.label.as_str())
+            .collect_vec();
         stdout()
             .queue(cursor::Show)?
             .queue(cursor::MoveTo(0, 0))?
@@ -317,20 +331,28 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
             selection = None;
             displayed_tools = all_tools
                 .iter()
-                .filter(|tool| tool.label.to_lowercase().contains(&search_str.to_lowercase()))
+                .filter(|tool| {
+                    tool.label
+                        .to_lowercase()
+                        .contains(&search_str.to_lowercase())
+                })
                 .take(max_tools)
                 .collect();
         } else if event.updown_driver(&mut selection, displayed_tools.len().saturating_sub(1)) {
         } else if event.scroll_driver(&mut selection, displayed_tools.len().saturating_sub(1)) {
         } else if event.is_key(KeyCode::Esc) {
             return Ok(None);
-        } else if event.is_key(KeyCode::Enter) & selection.is_some() {
-            return Ok(Some(displayed_tools[selection.unwrap()].clone()));
+        } else if let (true, Some(sel)) = (event.is_key(KeyCode::Enter), selection) {
+            return Ok(Some(displayed_tools[sel].clone()));
         } else if let Some((_, rows)) = event.is_resize() {
-            max_tools = (rows as usize).saturating_sub(bottom_gap);
+            max_tools = rows.saturating_sub(bottom_gap);
             displayed_tools = all_tools
                 .iter()
-                .filter(|tool| tool.label.to_lowercase().contains(&search_str.to_lowercase()))
+                .filter(|tool| {
+                    tool.label
+                        .to_lowercase()
+                        .contains(&search_str.to_lowercase())
+                })
                 .take(max_tools)
                 .collect();
             if let Some(s) = selection.as_mut() {

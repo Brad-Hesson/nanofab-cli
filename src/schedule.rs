@@ -283,7 +283,7 @@ impl<M> TimeTable<M> {
 }
 impl<M> Display for TimeTable<M> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut prev_date = match self.timeslots.get(0) {
+        let mut prev_date = match self.timeslots.first() {
             Some(ts) => match (ts.start(), ts.end()) {
                 (Some(dt), _) | (None, Some(dt)) => dt.date(),
                 _ => panic!("Timeslot cannot be endless on the start and end"),

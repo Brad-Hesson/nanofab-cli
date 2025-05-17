@@ -17,19 +17,19 @@ enum MaybeParsed<S, T> {
     Parsed(T),
 }
 impl<S, T> MaybeParsed<S, T> {
-    fn as_parsed(self) -> Option<T> {
+    fn try_into_parsed(self) -> Option<T> {
         match self {
             MaybeParsed::NotParsed(_) => None,
             MaybeParsed::Parsed(inner) => Some(inner),
         }
     }
-    fn as_ref_parsed(&self) -> Option<&T> {
+    fn try_as_parsed(&self) -> Option<&T> {
         match self {
             MaybeParsed::NotParsed(_) => None,
             MaybeParsed::Parsed(inner) => Some(inner),
         }
     }
-    fn as_ref_unparsed(&self) -> Option<&S> {
+    fn try_as_unparsed(&self) -> Option<&S> {
         match self {
             MaybeParsed::NotParsed(s) => Some(s),
             MaybeParsed::Parsed(_) => None,
@@ -50,32 +50,32 @@ impl Element {
     pub fn iter_contents(&self) -> impl Iterator<Item = &Content> {
         self.force_parse();
         let b = unsafe { self.contents.try_borrow_unguarded().unwrap() };
-        b.as_ref_parsed().expect("Just parsed").iter()
+        b.try_as_parsed().expect("Just parsed").iter()
     }
     pub fn iter_children(&self) -> impl Iterator<Item = &Element> {
-        self.iter_contents().filter_map(|c| c.as_ref_element())
+        self.iter_contents().filter_map(|c| c.try_as_element())
     }
     pub fn iter_decendents<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Element> + 'a> {
         Box::new(
             self.iter_children()
-                .map(|elem| Some(elem).into_iter().chain(elem.iter_decendents()))
-                .flatten(),
+                .flat_map(|elem| Some(elem).into_iter().chain(elem.iter_decendents())),
         )
     }
     pub fn into_iter_contents(self) -> impl Iterator<Item = Content> {
         self.force_parse();
         self.contents
             .into_inner()
-            .as_parsed()
+            .try_into_parsed()
             .expect("Just parsed")
             .into_iter()
     }
     pub fn into_iter_children(self) -> impl Iterator<Item = Element> {
-        self.into_iter_contents().filter_map(|c| c.as_element())
+        self.into_iter_contents()
+            .filter_map(|c| c.try_into_element())
     }
     fn force_parse(&self) {
         let b = self.contents.borrow();
-        let Some(i) = b.as_ref_unparsed() else {
+        let Some(i) = b.try_as_unparsed() else {
             return;
         };
         let (_, contents) = many0(xml_content::<()>)(i).unwrap();
@@ -116,7 +116,7 @@ pub trait ElementIter<'e>: Iterator<Item = &'e Element> + Sized + 'e {
         self,
         key: &'e str,
         value_predicate: impl Fn(&str) -> bool + 'e,
-    ) -> Box<dyn Iterator<Item = &Element> + 'e> {
+    ) -> Box<dyn Iterator<Item = &'e Element> + 'e> {
         Box::new(self.filter(
             move |elem| matches!(elem.get_attr(key), Some(value) if value_predicate(value)),
         ))
@@ -137,25 +137,25 @@ pub enum Content {
     Element(Element),
 }
 impl Content {
-    pub fn as_text(self) -> Option<String> {
+    pub fn try_into_text(self) -> Option<String> {
         match self {
             Content::Text(t) => Some(t),
             Content::Element(_) => None,
         }
     }
-    pub fn as_element(self) -> Option<Element> {
+    pub fn try_into_element(self) -> Option<Element> {
         match self {
             Content::Text(_) => None,
             Content::Element(elem) => Some(elem),
         }
     }
-    pub fn as_ref_text(&self) -> Option<&str> {
+    pub fn try_as_text(&self) -> Option<&str> {
         match self {
             Content::Text(t) => Some(t),
             Content::Element(_) => None,
         }
     }
-    pub fn as_ref_element(&self) -> Option<&Element> {
+    pub fn try_as_element(&self) -> Option<&Element> {
         match self {
             Content::Text(_) => None,
             Content::Element(elem) => Some(elem),
@@ -246,21 +246,21 @@ fn xml_attr<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, (String,
     Ok((i, (name, value)))
 }
 
-fn xml_name<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &str, E> {
+fn xml_name<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &'i str, E> {
     let start_p = alt((alpha1, tag("_")));
     let rest_p = alt((alphanumeric1, tag("-"), tag("_"), tag(".")));
     recognize(pair(start_p, many0(rest_p)))(i)
 }
 
-fn xml_multispace1<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &str, E> {
+fn xml_multispace1<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &'i str, E> {
     recognize(many1(alt((multispace1, xml_comment))))(i)
 }
 
-fn xml_multispace0<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &str, E> {
+fn xml_multispace0<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &'i str, E> {
     recognize(many0(alt((multispace1, xml_comment))))(i)
 }
 
-fn xml_comment<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &str, E> {
+fn xml_comment<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &'i str, E> {
     let start = "<!--";
     let end = "-->";
     delimited(tag(start), take_until(end), tag(end))(i)
@@ -268,8 +268,6 @@ fn xml_comment<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &str,
 
 #[cfg(test)]
 mod tests {
-    use std::mem::size_of_val;
-
     use itertools::Itertools;
     use nom::error::VerboseError;
 
@@ -277,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_parse_xml() {
-        let (rest, mut root) = xml_element::<VerboseError<&str>>(TEST2).unwrap();
+        let (rest, root) = xml_element::<VerboseError<&str>>(TEST2).unwrap();
         root.iter_children()
             .for_each(|elem| elem.iter_children().for_each(|_| ()));
         println!("{root}");
@@ -298,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_iter_decendents() {
-        let (_, mut root) = xml_element::<VerboseError<&str>>(TEST1).unwrap();
+        let (_, root) = xml_element::<VerboseError<&str>>(TEST1).unwrap();
         let children = root
             .iter_decendents()
             .map(|elem| (&elem.name, &elem.attrs))

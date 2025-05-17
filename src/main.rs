@@ -31,6 +31,18 @@ async fn main() -> Result<()> {
     stdout()
         .execute(crossterm::terminal::EnterAlternateScreen)?
         .execute(event::EnableMouseCapture)?;
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| unsafe {
+        crossterm::terminal::disable_raw_mode().unwrap_unchecked();
+        stdout()
+            .execute(crossterm::terminal::LeaveAlternateScreen)
+            .unwrap_unchecked()
+            .execute(event::DisableMouseCapture)
+            .unwrap_unchecked()
+            .execute(cursor::Show)
+            .unwrap_unchecked();
+        default_hook(info);
+    }));
     let res = run_ui().await;
     crossterm::terminal::disable_raw_mode()?;
     stdout()

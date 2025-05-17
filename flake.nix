@@ -1,5 +1,5 @@
 {
-  description = "Build a cargo project";
+  description = "A CLI program for accessing the Univeristy of Alberta Nanofabrication Laboratory user portal";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -41,7 +41,9 @@
         formatting = crane.cargoFmt { inherit (crateArgs) src; };
       };
       packages.default = crate;
-      apps.default = flakes.flake-utils.lib.mkApp { drv = crate; };
+      apps.default = (flakes.flake-utils.lib.mkApp { drv = crate; }) // {
+        meta.description = "A CLI program for accessing the Univeristy of Alberta Nanofabrication Laboratory user portal";
+      };
       devShells.default = crane.devShell {
         inputsFrom = [ crate ];
         packages = with pkgs; [

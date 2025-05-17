@@ -22,7 +22,7 @@ use term_ui::display_error_msg;
 use crate::nanofab::{Login, NanoFab, Tool};
 use crate::term_ui::{EventObject, QueueableCommand as _};
 
-const CONFIG_DIR: &str = ".nanofab-cli";
+const CONFIG_DIR: &str = "nanofab-cli";
 const LOGIN_FILENAME: &str = "login.ron";
 
 #[tokio::main]
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
 
 async fn run_ui() -> Result<()> {
     // Create the config dir if it doesn't exist
-    let mut config_dir = dirs::home_dir().unwrap();
+    let mut config_dir = dirs::config_dir().unwrap();
     config_dir.push(CONFIG_DIR);
     let mut login_filepath = config_dir.clone();
     login_filepath.push(LOGIN_FILENAME);
@@ -232,7 +232,7 @@ fn user_confirm() -> Result<bool> {
 }
 
 async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
-    let mut login_filepath = dirs::home_dir().unwrap();
+    let mut login_filepath = dirs::config_dir().unwrap();
     login_filepath.push(CONFIG_DIR);
     login_filepath.push(LOGIN_FILENAME);
     if let Ok(login_raw) = std::fs::read_to_string(&login_filepath) {

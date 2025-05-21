@@ -378,6 +378,11 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
             (event.as_key_press_event().map(|k| k.code), selection)
         {
             return Ok(Some(displayed_tools[sel].clone()));
+        } else if let (Some(KeyCode::Enter), 1) = (
+            event.as_key_press_event().map(|k| k.code),
+            displayed_tools.len(),
+        ) {
+            return Ok(Some(displayed_tools[0].clone()));
         } else if let Some((_, rows)) = event.as_resize_event() {
             max_tools = (rows as usize).saturating_sub(bottom_gap);
             displayed_tools = all_tools

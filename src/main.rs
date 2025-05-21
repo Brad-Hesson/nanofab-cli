@@ -52,6 +52,10 @@ async fn main() -> Result<()> {
     res
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Exit program requested")]
+struct ExitError;
+
 async fn run_ui() -> Result<()> {
     // Create the config dir if it doesn't exist
     let mut config_dir = dirs::config_dir().unwrap();
@@ -110,6 +114,9 @@ async fn run_ui() -> Result<()> {
                 selection => bail!("`{selection}` is not implemented"),
             };
             if let Err(err) = res {
+                if err.is::<ExitError>() {
+                    break;
+                }
                 display_error_msg(err)?;
             }
         };
@@ -177,6 +184,11 @@ async fn list_user_bookings(client: &NanoFab) -> Result<()> {
             .is_some_and(|k| [KeyCode::Enter, KeyCode::Esc].contains(&k.code))
         {
             break;
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| k.code == KeyCode::Char('q'))
+        {
+            bail!(ExitError);
         } else if let Some((_, rows)) = event.as_resize_event() {
             max_lines = (rows as usize).saturating_sub(bottom_gap);
         }
@@ -225,6 +237,11 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
             .is_some_and(|k| [KeyCode::Enter, KeyCode::Esc].contains(&k.code))
         {
             break;
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| k.code == KeyCode::Char('q'))
+        {
+            bail!(ExitError);
         } else if let Some((_, rows)) = event.as_resize_event() {
             max_lines = (rows as usize).saturating_sub(bottom_gap);
         }

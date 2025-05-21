@@ -4,10 +4,9 @@ use nom::{
     bytes::complete::{is_not, tag, take_until},
     character::complete::{alpha1, alphanumeric1, char, multispace1},
     combinator::{map, opt, recognize, verify},
-    error::{ContextError, ParseError, VerboseError},
     multi::{many0, many1, separated_list0},
     sequence::{delimited, pair, terminated},
-    IResult,
+    IResult, Parser,
 };
 use std::{cell::RefCell, collections::BTreeMap, fmt::Display, option::Option, str::FromStr};
 
@@ -78,7 +77,7 @@ impl Element {
         let Some(i) = b.try_as_unparsed() else {
             return;
         };
-        let (_, contents) = many0(xml_content::<()>)(i).unwrap();
+        let (_, contents) = many0(xml_content).parse(i).unwrap();
         drop(b);
         *self.contents.borrow_mut() = MaybeParsed::Parsed(contents);
     }
@@ -104,7 +103,7 @@ impl FromStr for Element {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match xml_element::<VerboseError<&str>>(s.trim()) {
+        match xml_element(s.trim()) {
             Ok((_, elem)) => Ok(elem),
             Err(nom::Err::Error(e) | nom::Err::Failure(e)) => Err(anyhow!(e.to_string())),
             _ => unimplemented!(),
@@ -178,14 +177,12 @@ struct Tag {
     is_close: bool,
 }
 
-fn xml_element<'i, E>(i: &'i str) -> IResult<&'i str, Element, E>
-where
-    E: ContextError<&'i str> + ParseError<&'i str>,
-{
-    let (i, Tag { name, attrs, .. }) = verify(xml_tag, |t| !t.is_close)(i)?;
+fn xml_element(i: &str) -> IResult<&str, Element> {
+    let (i, Tag { name, attrs, .. }) = verify(xml_tag, |t| !t.is_close).parse(i)?;
     let close_tag_p = verify(xml_tag, |t| t.is_close && t.name == name);
     let i_before = i;
-    let (i_after, maybe_contents) = opt(terminated(recognize(many0(xml_content)), close_tag_p))(i)?;
+    let (i_after, maybe_contents) =
+        opt(terminated(recognize(many0(xml_content)), close_tag_p)).parse(i)?;
     let (i, contents) = match maybe_contents {
         Some(contents) => (i_after, MaybeParsed::NotParsed(contents.into())),
         None => (i_before, MaybeParsed::Parsed(vec![])),
@@ -200,10 +197,7 @@ where
     ))
 }
 
-fn xml_content<'i, E>(i: &'i str) -> IResult<&'i str, Content, E>
-where
-    E: ContextError<&'i str> + ParseError<&'i str>,
-{
+fn xml_content(i: &str) -> IResult<&str, Content> {
     let to_trim_string = |s: &str| s.trim().to_string();
     let not_empty = |s: &str| !s.is_empty();
     let trim_text_p = verify(map(is_not("<"), to_trim_string), not_empty);
@@ -211,19 +205,20 @@ where
     alt((
         map(element_p, Content::Element),
         map(trim_text_p, Content::Text),
-    ))(i)
+    ))
+    .parse(i)
 }
 
-fn xml_tag<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, Tag, E> {
+fn xml_tag(i: &str) -> IResult<&str, Tag> {
     let attrs_p = separated_list0(xml_multispace1, xml_attr);
-    let (i, _) = char('<')(i)?;
-    let (i, start_slash) = opt(char('/'))(i)?;
+    let (i, _) = char('<').parse(i)?;
+    let (i, start_slash) = opt(char('/')).parse(i)?;
     let (i, name_str) = xml_name(i)?;
     let (i, _) = xml_multispace0(i)?;
-    let (i, maybe_attrs_vec) = opt(attrs_p)(i)?;
+    let (i, maybe_attrs_vec) = opt(attrs_p).parse(i)?;
     let (i, _) = xml_multispace0(i)?;
-    let (i, _) = opt(char('/'))(i)?;
-    let (i, _) = char('>')(i)?;
+    let (i, _) = opt(char('/')).parse(i)?;
+    let (i, _) = char('>').parse(i)?;
     let name = name_str.to_string();
     let attrs = maybe_attrs_vec.unwrap_or_default().into_iter().collect();
     let is_close = start_slash.is_some();
@@ -237,45 +232,44 @@ fn xml_tag<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, Tag, E> {
     ))
 }
 
-fn xml_attr<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, (String, String), E> {
+fn xml_attr(i: &str) -> IResult<&str, (String, String)> {
     let value_p = delimited(tag("=\""), take_until("\""), tag("\""));
     let (i, name_str) = xml_name(i)?;
-    let (i, maybe_value_str) = opt(value_p)(i)?;
+    let (i, maybe_value_str) = opt(value_p).parse(i)?;
     let name = name_str.to_string();
     let value = maybe_value_str.unwrap_or_default().to_string();
     Ok((i, (name, value)))
 }
 
-fn xml_name<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &'i str, E> {
+fn xml_name(i: &str) -> IResult<&str, &str> {
     let start_p = alt((alpha1, tag("_")));
     let rest_p = alt((alphanumeric1, tag("-"), tag("_"), tag(".")));
-    recognize(pair(start_p, many0(rest_p)))(i)
+    recognize(pair(start_p, many0(rest_p))).parse(i)
 }
 
-fn xml_multispace1<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &'i str, E> {
-    recognize(many1(alt((multispace1, xml_comment))))(i)
+fn xml_multispace1(i: &str) -> IResult<&str, &str> {
+    recognize(many1(alt((multispace1, xml_comment)))).parse(i)
 }
 
-fn xml_multispace0<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &'i str, E> {
-    recognize(many0(alt((multispace1, xml_comment))))(i)
+fn xml_multispace0(i: &str) -> IResult<&str, &str> {
+    recognize(many0(alt((multispace1, xml_comment)))).parse(i)
 }
 
-fn xml_comment<'i, E: ParseError<&'i str>>(i: &'i str) -> IResult<&'i str, &'i str, E> {
+fn xml_comment(i: &str) -> IResult<&str, &str> {
     let start = "<!--";
     let end = "-->";
-    delimited(tag(start), take_until(end), tag(end))(i)
+    delimited(tag(start), take_until(end), tag(end)).parse(i)
 }
 
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use nom::error::VerboseError;
 
     use super::*;
 
     #[test]
     fn test_parse_xml() {
-        let (rest, root) = xml_element::<VerboseError<&str>>(TEST2).unwrap();
+        let (rest, root) = xml_element(TEST2).unwrap();
         root.iter_children()
             .for_each(|elem| elem.iter_children().for_each(|_| ()));
         println!("{root}");
@@ -286,7 +280,7 @@ mod tests {
     }
     #[test]
     fn test_into_iter_contents() {
-        let (rest, root) = xml_element::<VerboseError<&str>>(TEST2).unwrap();
+        let (rest, root) = xml_element(TEST2).unwrap();
         println!("{:#?}", root.into_iter_contents().collect_vec());
         println!("Rest: `{rest}`");
         // let pretty = format!("{root}");
@@ -296,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_iter_decendents() {
-        let (_, root) = xml_element::<VerboseError<&str>>(TEST1).unwrap();
+        let (_, root) = xml_element(TEST1).unwrap();
         let children = root
             .iter_decendents()
             .map(|elem| (&elem.name, &elem.attrs))

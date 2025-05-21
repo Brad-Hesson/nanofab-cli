@@ -92,9 +92,15 @@ async fn run_ui() -> Result<()> {
             .flush()?;
         let event = event::read()?;
         if event.updown_driver(&mut selector, options.len() - 1) {
-        } else if event.is_key(KeyCode::Esc) || event.is_key(KeyCode::Char('q')) {
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| [KeyCode::Esc, KeyCode::Char('q')].contains(&k.code))
+        {
             break;
-        } else if event.is_key(KeyCode::Enter) {
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| k.code == KeyCode::Enter)
+        {
             let res = match options[selector.unwrap()] {
                 "Exit" => break,
                 "List Tool Openings" => list_tool_openings(&client).await,
@@ -126,10 +132,10 @@ async fn list_user_projects(client: &NanoFab) -> Result<()> {
             .queue(terminal::Clear(terminal::ClearType::FromCursorDown))?
             .flush()?;
         let event = event::read()?;
-        #[allow(clippy::if_same_then_else)]
-        if event.is_key(KeyCode::Enter) {
-            break;
-        } else if event.is_key(KeyCode::Esc) {
+        if event
+            .as_key_press_event()
+            .is_some_and(|k| [KeyCode::Enter, KeyCode::Esc].contains(&k.code))
+        {
             break;
         }
     }
@@ -166,12 +172,13 @@ async fn list_user_bookings(client: &NanoFab) -> Result<()> {
         #[allow(clippy::if_same_then_else)]
         if event.updown_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
         } else if event.scroll_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
-        } else if event.is_key(KeyCode::Enter) {
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| [KeyCode::Enter, KeyCode::Esc].contains(&k.code))
+        {
             break;
-        } else if event.is_key(KeyCode::Esc) {
-            break;
-        } else if let Some((_, rows)) = event.is_resize() {
-            max_lines = rows.saturating_sub(bottom_gap);
+        } else if let Some((_, rows)) = event.as_resize_event() {
+            max_lines = (rows as usize).saturating_sub(bottom_gap);
         }
     }
     Ok(())
@@ -213,12 +220,13 @@ async fn list_tool_openings(client: &NanoFab) -> Result<()> {
         #[allow(clippy::if_same_then_else)]
         if event.updown_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
         } else if event.scroll_driver(&mut scroll, lines.len().saturating_sub(max_lines)) {
-        } else if event.is_key(KeyCode::Enter) {
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| [KeyCode::Enter, KeyCode::Esc].contains(&k.code))
+        {
             break;
-        } else if event.is_key(KeyCode::Esc) {
-            break;
-        } else if let Some((_, rows)) = event.is_resize() {
-            max_lines = rows.saturating_sub(bottom_gap);
+        } else if let Some((_, rows)) = event.as_resize_event() {
+            max_lines = (rows as usize).saturating_sub(bottom_gap);
         }
     }
     Ok(())
@@ -236,7 +244,10 @@ fn user_confirm() -> Result<bool> {
             .flush()?;
         let event = event::read()?;
         if event.leftright_driver(&mut selector, 1) {
-        } else if event.is_key(KeyCode::Enter) {
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| k.code == KeyCode::Enter)
+        {
             break;
         }
     }
@@ -263,9 +274,10 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
             .flush()?;
         let event = event::read()?;
         if event.string_driver(&mut username) {
-        } else if event.is_key(KeyCode::Esc) {
-            return Ok(None);
-        } else if event.is_key(KeyCode::Enter) {
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| [KeyCode::Enter, KeyCode::Esc].contains(&k.code))
+        {
             break;
         }
     }
@@ -280,9 +292,10 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
             .flush()?;
         let event = event::read()?;
         if event.string_driver(&mut password) {
-        } else if event.is_key(KeyCode::Esc) {
-            return Ok(None);
-        } else if event.is_key(KeyCode::Enter) {
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| [KeyCode::Enter, KeyCode::Esc].contains(&k.code))
+        {
             break;
         }
     }
@@ -299,7 +312,10 @@ async fn user_login(client: &NanoFab) -> Result<Option<Login>> {
             .flush()?;
         let event = event::read()?;
         if event.leftright_driver(&mut save_login, 1) {
-        } else if event.is_key(KeyCode::Enter) {
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| k.code == KeyCode::Enter)
+        {
             break;
         }
     }
@@ -353,12 +369,17 @@ async fn user_tool_select(client: &NanoFab) -> Result<Option<Tool>> {
                 .collect();
         } else if event.updown_driver(&mut selection, displayed_tools.len().saturating_sub(1)) {
         } else if event.scroll_driver(&mut selection, displayed_tools.len().saturating_sub(1)) {
-        } else if event.is_key(KeyCode::Esc) {
+        } else if event
+            .as_key_press_event()
+            .is_some_and(|k| k.code == KeyCode::Esc)
+        {
             return Ok(None);
-        } else if let (true, Some(sel)) = (event.is_key(KeyCode::Enter), selection) {
+        } else if let (Some(KeyCode::Enter), Some(sel)) =
+            (event.as_key_press_event().map(|k| k.code), selection)
+        {
             return Ok(Some(displayed_tools[sel].clone()));
-        } else if let Some((_, rows)) = event.is_resize() {
-            max_tools = rows.saturating_sub(bottom_gap);
+        } else if let Some((_, rows)) = event.as_resize_event() {
+            max_tools = (rows as usize).saturating_sub(bottom_gap);
             displayed_tools = all_tools
                 .iter()
                 .filter(|tool| {

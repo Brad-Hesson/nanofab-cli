@@ -194,7 +194,10 @@ pub fn display_error_msg(error: anyhow::Error) -> Result<()> {
     stdout().queue(style::ResetColor)?.flush()?;
     'event_loop: loop {
         let event = event::read()?;
-        if event.is_key(KeyCode::Enter) | event.is_key(KeyCode::Esc) {
+        if event
+            .as_key_press_event()
+            .is_some_and(|k| [KeyCode::Enter, KeyCode::Esc].contains(&k.code))
+        {
             break 'event_loop;
         }
     }
